@@ -64,7 +64,7 @@ const SurveyChat = () => {
         setMessages([
           {
             role: 'bot',
-            content: `Welcome to the “${sRes.data.title}” survey! ` +
+            content: `Welcome to the "${sRes.data.title}" survey! ` +
               `I'm ReadyBot – please answer each question thoughtfully. Let's begin!`
           }
         ]);
@@ -162,43 +162,47 @@ const SurveyChat = () => {
   /* Submit ANSWER                                      */
   /* -------------------------------------------------- */
   const handleSubmitAnswer = async () => {
-    if (!userInput.trim() || submitting || !responseSession) return;
+    if (!userInput.trim() || submitting || !responseSession || !survey) return;
 
     try {
       setSubmitting(true);
       setError(null);
 
+      /* 1️⃣  show the user's message immediately */
       const userMsg = { role: 'user', content: userInput };
       setMessages(prev => [...prev, userMsg]);
       setUserInput('');
 
-      // Get the actual current question index from the response session's currentQuestion
-      const currentQuestionIndex = survey.Questions.findIndex(
-        q => q.id === responseSession.currentQuestion.id
-      );
+      /* 2️⃣  figure out which question we're answering        */
+      /*      (used for chat-history *and* for the API payload) */
+      const currentQuestionIndex = responseSession.progress.current - 1;
 
-      const res = await axios.post(
-        `${API_URL}/api/survey/response/${responseSession.responseId}`,
-        { 
-          answer: userMsg.content, 
-          participantId: responseSession.participantId,
-          action: 'answer'
-        }
-      );
-
-      // persist chat history
+      /* 3️⃣  persist chat history locally */
       setChatHistory(prev => ({
         ...prev,
         [currentQuestionIndex]: [...(prev[currentQuestionIndex] || []), userMsg]
       }));
 
-      // update state flags
+      /* 4️⃣  send the answer to the server                      */
+      const res = await axios.post(
+        `${API_URL}/api/survey/response/${responseSession.responseId}`,
+        {
+          answer: userMsg.content,
+          participantId: responseSession.participantId,
+          action: 'answer',
+          targetQuestionIndex: currentQuestionIndex          // <-- key line
+        }
+      );
+
+      /* 5️⃣  refresh the sidebar states */
       updateQuestionStates(res.data.sessionData, res.data.answers);
 
-      // when ALL questions are answered, just congratulate – do NOT finish
+      /* 6️⃣  bot reply + progress handling */
       if (res.data.allQuestionsAnswered) {
+        // All questions now have answers, but we DO NOT auto-submit.
         setResponseSession(prev => ({
           ...prev,
+          currentQuestion: survey.Questions[res.data.sessionData.currentQuestionIndex],
           progress: res.data.progress
         }));
 
@@ -208,21 +212,16 @@ const SurveyChat = () => {
             role: 'bot',
             content:
               res.data.aiResponse ||
-              'Great job – you have answered every question! You can still review ' +
-              'your responses using the list on the left and press "Submit Survey" whenever you are ready.',
+              'Great job - you\'ve answered every question! You can review your responses on the left and press "Submit Survey" whenever you\'re ready.',
             skipTyped: true
           }
         ]);
-        return;
-      }
-
-      // Move to next question if not all questions are answered
-      const nextQuestionIndex = currentQuestionIndex + 1;
-      if (nextQuestionIndex < survey.Questions.length) {
+      } else {
+        // Move forward to the next unanswered question
         setResponseSession(prev => ({
           ...prev,
           currentQuestion: res.data.nextQuestion,
-          progress: { ...prev.progress, current: nextQuestionIndex + 1 }
+          progress: res.data.progress
         }));
 
         setMessages(prev => [
@@ -239,22 +238,6 @@ const SurveyChat = () => {
             skipTyped: true
           }
         ]);
-      } else {
-        // Stay on current question if it's the last one
-        setResponseSession(prev => ({
-          ...prev,
-          currentQuestion: res.data.nextQuestion,
-          progress: res.data.progress
-        }));
-
-        setMessages(prev => [
-          ...prev,
-          {
-            role: 'bot',
-            content: res.data.aiResponse,
-            skipTyped: true
-          }
-        ]);
       }
     } catch (err) {
       console.error(err);
@@ -263,6 +246,7 @@ const SurveyChat = () => {
       setSubmitting(false);
     }
   };
+
 
   /* -------------------------------------------------- */
   /* Skip Question                                      */

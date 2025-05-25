@@ -115,6 +115,7 @@ exports.submitAnswer = async (req, res) => {
     // Which question are we working on?
     // ---------------------------------------------------------------------
     let questionIndex = response.sessionData.currentQuestionIndex;
+    let currentQuestion = survey.Questions[questionIndex];
 
     if (action === 'navigate') {
       if (
@@ -127,6 +128,7 @@ exports.submitAnswer = async (req, res) => {
       }
 
       questionIndex = targetQuestionIndex;
+      currentQuestion = survey.Questions[questionIndex];
       response.sessionData.currentQuestionIndex = questionIndex;
       await response.save({ transaction: t });
       await t.commit();
@@ -146,7 +148,6 @@ exports.submitAnswer = async (req, res) => {
       });
     }
 
-    const currentQuestion = survey.Questions[questionIndex];
     if (!currentQuestion) {
       await t.rollback();
       return res.status(400).json({ message: 'No current question found' });
@@ -191,6 +192,12 @@ exports.submitAnswer = async (req, res) => {
       return res.status(400).json({ message: 'Answer is required for submission' });
     }
 
+    // If targetQuestionIndex is provided, use it for editing previous answer
+    if (typeof targetQuestionIndex === 'number' && targetQuestionIndex >= 0 && targetQuestionIndex < survey.Questions.length) {
+      questionIndex = targetQuestionIndex;
+      currentQuestion = survey.Questions[questionIndex];
+    }
+
     // quality scoring
     const qualityScore = await AIService.scoreResponseQuality(
       currentQuestion.text,
@@ -224,12 +231,18 @@ exports.submitAnswer = async (req, res) => {
     // -----------------------------------------------------------------
     // decide where the pointer should go next
     // -----------------------------------------------------------------
-    let nextIdx = questionIndex + 1;
-    while (nextIdx < survey.Questions.length && updatedCompleted.includes(nextIdx)) {
-      nextIdx += 1;
+    let nextIdx = questionIndex;
+    
+    // If we're editing a previous answer, stay on the same question
+    // Otherwise, move to the next unanswered question
+    if (typeof targetQuestionIndex !== 'number' || targetQuestionIndex === questionIndex) {
+      nextIdx = questionIndex + 1;
+      while (nextIdx < survey.Questions.length && updatedCompleted.includes(nextIdx)) {
+        nextIdx += 1;
+      }
+      // if we ran off the end, keep the pointer on the last question
+      if (nextIdx >= survey.Questions.length) nextIdx = questionIndex;
     }
-    // if we ran off the end, keep the pointer on the last question
-    if (nextIdx >= survey.Questions.length) nextIdx = questionIndex;
 
     response.answers = answers;
     response.sessionData = {
