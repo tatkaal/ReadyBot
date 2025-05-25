@@ -3,11 +3,13 @@ const express = require('express');
 const cors = require('cors');
 const { sequelize } = require('./models');
 const authRoutes = require('./routes/auth');
+const adminRoutes = require('./routes/admin');
 const questionRoutes = require('./routes/questions');
-const surveyRoutes = require('./routes/surveys');
-const responseRoutes = require('./routes/responses');
+const surveyRoutes = require('./routes/survey');
+const surveyPublicRoutes = require('./routes/surveys');
 const evaluationRoutes = require('./routes/evaluation');
-const publicSurveyRoutes = require('./routes/survey');
+const llmConfigRoutes = require('./routes/llm-config');
+const responseRoutes = require('./routes/responses');
 
 const app = express();
 const PORT = process.env.PORT || 5000;
@@ -18,11 +20,13 @@ app.use(express.json());
 
 // Routes
 app.use('/api/auth', authRoutes);
-app.use('/api/questions', questionRoutes);
-app.use('/api/surveys', surveyRoutes);
-app.use('/api/responses', responseRoutes);
+app.use('/api/admin', adminRoutes);
+app.use('/api/question', questionRoutes);
+app.use('/api/survey', surveyRoutes);
+app.use('/api/surveys', surveyPublicRoutes);
 app.use('/api/evaluation', evaluationRoutes);
-app.use('/api/survey', publicSurveyRoutes);
+app.use('/api/llm-config', llmConfigRoutes);
+app.use('/api/responses', responseRoutes);
 
 // Health check route
 app.get('/health', (req, res) => {
@@ -46,7 +50,7 @@ const startServer = async () => {
     
     // Sync database models (in development only)
     if (process.env.NODE_ENV === 'development') {
-      await sequelize.sync({ alter: true });
+      await sequelize.sync();
       console.log('Database models synchronized.');
     }
     

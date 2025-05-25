@@ -223,7 +223,7 @@ const SurveyDetail = () => {
   };
   
   const handleViewResponses = () => {
-    navigate(`/survey/${id}/responses`);
+    navigate(`/responses/${id}`);
   };
   
   if (loading && !survey) {

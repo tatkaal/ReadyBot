@@ -574,6 +574,17 @@ const Responses = () => {
                               </Typography>
                               {renderStarRating(answer.qualityScore)}
                             </Box>
+                            
+                            {answer.improvementHint && (
+                              <Box sx={{ mt: 2, p: 1.5, bgcolor: 'info.light', borderRadius: 1 }}>
+                                <Typography variant="subtitle2" color="info.contrastText" gutterBottom>
+                                  Improvement Hint:
+                                </Typography>
+                                <Typography variant="body2" color="info.contrastText">
+                                  {answer.improvementHint}
+                                </Typography>
+                              </Box>
+                            )}
                           </CardContent>
                         </Card>
                       ))}

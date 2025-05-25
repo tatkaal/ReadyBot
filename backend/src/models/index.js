@@ -30,6 +30,7 @@ const Question = require('./Question')(sequelize);
 const Survey = require('./Survey')(sequelize);
 const Response = require('./Response')(sequelize);
 const ModelEvaluation = require('./ModelEvaluation')(sequelize);
+const LLMConfig = require('./LLMConfig')(sequelize);
 
 // Define associations
 Admin.hasMany(Question, { foreignKey: 'createdBy' });
@@ -37,6 +38,9 @@ Question.belongsTo(Admin, { foreignKey: 'createdBy' });
 
 Admin.hasMany(Survey, { foreignKey: 'createdBy' });
 Survey.belongsTo(Admin, { foreignKey: 'createdBy' });
+
+Admin.hasMany(LLMConfig, { foreignKey: 'createdBy' });
+LLMConfig.belongsTo(Admin, { foreignKey: 'createdBy' });
 
 Survey.belongsToMany(Question, { through: 'SurveyQuestions' });
 Question.belongsToMany(Survey, { through: 'SurveyQuestions' });
@@ -54,5 +58,6 @@ module.exports = {
   Question,
   Survey,
   Response,
-  ModelEvaluation
+  ModelEvaluation,
+  LLMConfig
 };

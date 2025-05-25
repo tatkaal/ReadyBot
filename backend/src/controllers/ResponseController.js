@@ -125,3 +125,30 @@ exports.getSurveyAnalytics = async (req, res) => {
     res.status(500).json({ message: 'Server error retrieving analytics' });
   }
 };
+
+// Get total responses across all surveys
+exports.getAllResponsesCount = async (req, res) => {
+  try {
+    // Get all surveys for the admin
+    const surveys = await Survey.findAll({
+      where: { createdBy: req.admin.id },
+      attributes: ['id']
+    });
+    
+    const surveyIds = surveys.map(survey => survey.id);
+    
+    // Get total responses for all surveys
+    const totalResponses = await Response.count({
+      where: {
+        surveyId: {
+          [Op.in]: surveyIds
+        }
+      }
+    });
+    
+    res.json({ totalResponses });
+  } catch (error) {
+    console.error('Get all responses count error:', error);
+    res.status(500).json({ message: 'Server error retrieving total responses' });
+  }
+};

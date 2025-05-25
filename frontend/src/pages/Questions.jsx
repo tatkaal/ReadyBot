@@ -38,11 +38,28 @@ const Questions = () => {
   const fetchQuestions = async () => {
     try {
       setLoading(true);
-      const res = await axios.get(`${import.meta.env.VITE_API_URL || 'http://localhost:5000'}/api/questions`);
+      const token = localStorage.getItem('token');
+      if (!token) {
+        showSnackbar('Please login to view questions', 'error');
+        return;
+      }
+
+      const res = await axios.get(
+        `${import.meta.env.VITE_API_URL || 'http://localhost:5000'}/api/question`,
+        {
+          headers: {
+            'x-auth-token': token
+          }
+        }
+      );
       setQuestions(res.data);
     } catch (err) {
       console.error('Error fetching questions:', err);
-      showSnackbar('Failed to load questions', 'error');
+      if (err.response?.status === 401) {
+        showSnackbar('Session expired. Please login again.', 'error');
+      } else {
+        showSnackbar('Failed to load questions', 'error');
+      }
     } finally {
       setLoading(false);
     }
@@ -80,20 +97,42 @@ const Questions = () => {
 
   const handleSubmit = async () => {
     try {
+      const token = localStorage.getItem('token');
+      if (!token) {
+        showSnackbar('Please login to create questions', 'error');
+        return;
+      }
+
+      const headers = {
+        'x-auth-token': token
+      };
+
       if (editingQuestion) {
         // Update existing question
-        await axios.put(`${import.meta.env.VITE_API_URL || 'http://localhost:5000'}/api/questions/${editingQuestion.id}`, formData);
+        await axios.put(
+          `${import.meta.env.VITE_API_URL || 'http://localhost:5000'}/api/question/${editingQuestion.id}`, 
+          formData,
+          { headers }
+        );
         showSnackbar('Question updated successfully');
       } else {
         // Create new question
-        await axios.post(`${import.meta.env.VITE_API_URL || 'http://localhost:5000'}/api/questions`, formData);
+        await axios.post(
+          `${import.meta.env.VITE_API_URL || 'http://localhost:5000'}/api/question`, 
+          formData,
+          { headers }
+        );
         showSnackbar('Question created successfully');
       }
       handleCloseDialog();
       fetchQuestions();
     } catch (err) {
       console.error('Error saving question:', err);
-      showSnackbar('Failed to save question', 'error');
+      if (err.response?.status === 401) {
+        showSnackbar('Session expired. Please login again.', 'error');
+      } else {
+        showSnackbar(err.response?.data?.message || 'Failed to save question', 'error');
+      }
     }
   };
 
@@ -106,12 +145,29 @@ const Questions = () => {
 
   const handleDeleteQuestion = async () => {
     try {
-      await axios.delete(`${import.meta.env.VITE_API_URL || 'http://localhost:5000'}/api/questions/${deleteConfirmDialog.questionId}`);
+      const token = localStorage.getItem('token');
+      if (!token) {
+        showSnackbar('Please login to delete questions', 'error');
+        return;
+      }
+
+      await axios.delete(
+        `${import.meta.env.VITE_API_URL || 'http://localhost:5000'}/api/question/${deleteConfirmDialog.questionId}`,
+        {
+          headers: {
+            'x-auth-token': token
+          }
+        }
+      );
       showSnackbar('Question deleted successfully');
       fetchQuestions();
     } catch (err) {
       console.error('Error deleting question:', err);
-      showSnackbar('Failed to delete question', 'error');
+      if (err.response?.status === 401) {
+        showSnackbar('Session expired. Please login again.', 'error');
+      } else {
+        showSnackbar('Failed to delete question', 'error');
+      }
     } finally {
       setDeleteConfirmDialog({
         open: false,

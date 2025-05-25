@@ -1,4 +1,5 @@
 const { DataTypes } = require('sequelize');
+const bcrypt = require('bcryptjs');
 
 module.exports = (sequelize) => {
   const Admin = sequelize.define('Admin', {
@@ -37,8 +38,21 @@ module.exports = (sequelize) => {
     }
   }, {
     tableName: 'admins',
-    timestamps: true
+    timestamps: true,
+    hooks: {
+      beforeSave: async (admin) => {
+        if (admin.changed('password')) {
+          const salt = await bcrypt.genSalt(10);
+          admin.password = await bcrypt.hash(admin.password, salt);
+        }
+      }
+    }
   });
 
+  // Instance method to compare password
+  Admin.prototype.comparePassword = async function(candidatePassword) {
+    return await bcrypt.compare(candidatePassword, this.password);
+  };
+
   return Admin;
-};
+}; 

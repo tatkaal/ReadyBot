@@ -17,6 +17,7 @@ import Responses from './pages/Responses';
 import Evaluation from './pages/Evaluation';
 import SurveyChat from './pages/SurveyChat';
 import NotFound from './pages/NotFound';
+import LLMConfig from './pages/LLMConfig';
 
 // Protected Route Component
 const ProtectedRoute = ({ children }) => {
@@ -57,6 +58,7 @@ const App = () => {
         <Route path="surveys/:id" element={<SurveyDetail />} />
         <Route path="responses/:surveyId" element={<Responses />} />
         <Route path="evaluation" element={<Evaluation />} />
+        <Route path="llm-config" element={<LLMConfig />} />
       </Route>
       
       {/* 404 Route */}

@@ -11,6 +11,7 @@ import AssessmentIcon from '@mui/icons-material/Assessment';
 import BarChartIcon from '@mui/icons-material/BarChart';
 import LogoutIcon from '@mui/icons-material/Logout';
 import SmartToyIcon from '@mui/icons-material/SmartToy';
+import SettingsIcon from '@mui/icons-material/Settings';
 
 const Header = () => {
   const [drawerOpen, setDrawerOpen] = React.useState(false);
@@ -34,6 +35,7 @@ const Header = () => {
     { text: 'Questions', icon: <QuestionAnswerIcon />, path: '/questions' },
     { text: 'Surveys', icon: <AssessmentIcon />, path: '/surveys' },
     { text: 'Evaluation', icon: <BarChartIcon />, path: '/evaluation' },
+    { text: 'LLM Config', icon: <SettingsIcon />, path: '/llm-config' },
   ];
 
   const drawer = (

@@ -16,12 +16,12 @@ module.exports = (sequelize) => {
     },
     description: {
       type: DataTypes.TEXT,
-      allowNull: false
+      allowNull: true
     },
     uniqueId: {
       type: DataTypes.STRING,
-      allowNull: false,
-      unique: true
+      unique: true,
+      allowNull: true
     },
     shareableLink: {
       type: DataTypes.STRING,
@@ -29,7 +29,18 @@ module.exports = (sequelize) => {
     },
     isActive: {
       type: DataTypes.BOOLEAN,
+      allowNull: false,
       defaultValue: true
+    },
+    llmConfigs: {
+      type: DataTypes.JSONB,
+      allowNull: false,
+      defaultValue: {
+        intent_classification: null,
+        response_generation: null,
+        scoring: null,
+        hint_generation: null
+      }
     },
     createdBy: {
       type: DataTypes.UUID,

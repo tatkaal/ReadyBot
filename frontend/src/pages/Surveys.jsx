@@ -3,6 +3,8 @@ import { Box, Typography, Grid, Card, CardContent, IconButton, Button, TextField
 import { motion } from 'framer-motion';
 import axios from 'axios';
 import { useAuth } from '../contexts/AuthContext';
+import LLMConfigSelector from '../components/LLMConfigSelector';
+import { useNavigate } from 'react-router-dom';
 
 // Icons
 import AddIcon from '@mui/icons-material/Add';
@@ -23,7 +25,13 @@ const Surveys = () => {
   const [formData, setFormData] = useState({
     title: '',
     description: '',
-    questions: []
+    questions: [],
+    llmConfigs: {
+      intent_classification: null,
+      response_generation: null,
+      scoring: null,
+      hint_generation: null
+    }
   });
   const [snackbar, setSnackbar] = useState({
     open: false,
@@ -40,6 +48,7 @@ const Surveys = () => {
   });
   
   const { currentAdmin } = useAuth();
+  const navigate = useNavigate();
 
   useEffect(() => {
     fetchData();
@@ -48,15 +57,29 @@ const Surveys = () => {
   const fetchData = async () => {
     try {
       setLoading(true);
+      const token = localStorage.getItem('token');
+      if (!token) {
+        showSnackbar('Please login to view surveys', 'error');
+        return;
+      }
+
+      const headers = {
+        'x-auth-token': token
+      };
+
       const [surveysRes, questionsRes] = await Promise.all([
-        axios.get(`${import.meta.env.VITE_API_URL || 'http://localhost:5000'}/api/surveys`),
-        axios.get(`${import.meta.env.VITE_API_URL || 'http://localhost:5000'}/api/questions`)
+        axios.get(`${import.meta.env.VITE_API_URL || 'http://localhost:5000'}/api/surveys`, { headers }),
+        axios.get(`${import.meta.env.VITE_API_URL || 'http://localhost:5000'}/api/question`, { headers })
       ]);
       setSurveys(surveysRes.data);
       setQuestions(questionsRes.data);
     } catch (err) {
       console.error('Error fetching data:', err);
-      showSnackbar('Failed to load data', 'error');
+      if (err.response?.status === 401) {
+        showSnackbar('Session expired. Please login again.', 'error');
+      } else {
+        showSnackbar('Failed to load data', 'error');
+      }
     } finally {
       setLoading(false);
     }
@@ -68,14 +91,26 @@ const Surveys = () => {
       setFormData({
         title: survey.title,
         description: survey.description || '',
-        questions: survey.Questions.map(q => q.id)
+        questions: survey.Questions.map(q => q.id),
+        llmConfigs: {
+          intent_classification: survey.llmConfigs?.intent_classification || null,
+          response_generation: survey.llmConfigs?.response_generation || null,
+          scoring: survey.llmConfigs?.scoring || null,
+          hint_generation: survey.llmConfigs?.hint_generation || null
+        }
       });
     } else {
       setEditingSurvey(null);
       setFormData({
         title: '',
         description: '',
-        questions: []
+        questions: [],
+        llmConfigs: {
+          intent_classification: null,
+          response_generation: null,
+          scoring: null,
+          hint_generation: null
+        }
       });
     }
     setOpenDialog(true);
@@ -104,22 +139,54 @@ const Surveys = () => {
     });
   };
 
+  const handleLLMConfigChange = (task, value) => {
+    setFormData(prev => ({
+      ...prev,
+      llmConfigs: {
+        ...prev.llmConfigs,
+        [task]: value
+      }
+    }));
+  };
+
   const handleSubmit = async () => {
     try {
+      const token = localStorage.getItem('token');
+      if (!token) {
+        showSnackbar('Please login to create surveys', 'error');
+        return;
+      }
+
+      const headers = {
+        'x-auth-token': token
+      };
+
       if (editingSurvey) {
         // Update existing survey
-        await axios.put(`${import.meta.env.VITE_API_URL || 'http://localhost:5000'}/api/surveys/${editingSurvey.id}`, formData);
+        await axios.put(
+          `${import.meta.env.VITE_API_URL || 'http://localhost:5000'}/api/surveys/${editingSurvey.id}`, 
+          formData,
+          { headers }
+        );
         showSnackbar('Survey updated successfully');
       } else {
         // Create new survey
-        await axios.post(`${import.meta.env.VITE_API_URL || 'http://localhost:5000'}/api/surveys`, formData);
+        await axios.post(
+          `${import.meta.env.VITE_API_URL || 'http://localhost:5000'}/api/surveys`, 
+          formData,
+          { headers }
+        );
         showSnackbar('Survey created successfully');
       }
       handleCloseDialog();
       fetchData();
     } catch (err) {
       console.error('Error saving survey:', err);
-      showSnackbar('Failed to save survey', 'error');
+      if (err.response?.status === 401) {
+        showSnackbar('Session expired. Please login again.', 'error');
+      } else {
+        showSnackbar(err.response?.data?.message || 'Failed to save survey', 'error');
+      }
     }
   };
 
@@ -132,12 +199,29 @@ const Surveys = () => {
 
   const handleDeleteSurvey = async () => {
     try {
-      await axios.delete(`${import.meta.env.VITE_API_URL || 'http://localhost:5000'}/api/surveys/${deleteConfirmDialog.surveyId}`);
+      const token = localStorage.getItem('token');
+      if (!token) {
+        showSnackbar('Please login to delete surveys', 'error');
+        return;
+      }
+
+      await axios.delete(
+        `${import.meta.env.VITE_API_URL || 'http://localhost:5000'}/api/surveys/${deleteConfirmDialog.surveyId}`,
+        {
+          headers: {
+            'x-auth-token': token
+          }
+        }
+      );
       showSnackbar('Survey deleted successfully');
       fetchData();
     } catch (err) {
       console.error('Error deleting survey:', err);
-      showSnackbar('Failed to delete survey', 'error');
+      if (err.response?.status === 401) {
+        showSnackbar('Session expired. Please login again.', 'error');
+      } else {
+        showSnackbar('Failed to delete survey', 'error');
+      }
     } finally {
       setDeleteConfirmDialog({
         open: false,
@@ -148,7 +232,21 @@ const Surveys = () => {
 
   const handleGenerateLink = async (survey) => {
     try {
-      const res = await axios.post(`${import.meta.env.VITE_API_URL || 'http://localhost:5000'}/api/surveys/${survey.id}/generate-link`);
+      const token = localStorage.getItem('token');
+      if (!token) {
+        showSnackbar('Please login to generate links', 'error');
+        return;
+      }
+
+      const res = await axios.post(
+        `${import.meta.env.VITE_API_URL || 'http://localhost:5000'}/api/surveys/${survey.id}/generate-link`,
+        {},
+        {
+          headers: {
+            'x-auth-token': token
+          }
+        }
+      );
       
       // Update the survey in the state
       const updatedSurveys = surveys.map(s => 
@@ -167,7 +265,11 @@ const Surveys = () => {
       showSnackbar('New link generated successfully');
     } catch (err) {
       console.error('Error generating link:', err);
-      showSnackbar('Failed to generate link', 'error');
+      if (err.response?.status === 401) {
+        showSnackbar('Session expired. Please login again.', 'error');
+      } else {
+        showSnackbar('Failed to generate link', 'error');
+      }
     }
   };
 
@@ -291,7 +393,7 @@ const Surveys = () => {
                 >
                   <CardContent sx={{ p: 3 }}>
                     <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
-                      <Box>
+                      <Box sx={{ flexGrow: 1, cursor: 'pointer' }} onClick={() => navigate(`/surveys/${survey.id}`)}>
                         <Typography variant="h6" component="h3" gutterBottom sx={{ fontWeight: 600 }}>
                           {survey.title}
                         </Typography>
@@ -340,7 +442,10 @@ const Surveys = () => {
                             </Typography>
                             <IconButton 
                               size="small" 
-                              onClick={() => handleCopyLink(survey.shareableLink)}
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                handleCopyLink(survey.shareableLink);
+                              }}
                               sx={{ ml: 1 }}
                             >
                               <ContentCopyIcon fontSize="small" />
@@ -361,7 +466,10 @@ const Surveys = () => {
                         <Tooltip title="View Responses">
                           <IconButton 
                             size="small"
-                            onClick={() => window.location.href = `/responses/${survey.id}`}
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              navigate(`/responses/${survey.id}`);
+                            }}
                             sx={{ mr: 1 }}
                           >
                             <BarChartIcon fontSize="small" />
@@ -371,7 +479,10 @@ const Surveys = () => {
                         <Tooltip title="Generate Link">
                           <IconButton 
                             size="small"
-                            onClick={() => handleGenerateLink(survey)}
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              handleGenerateLink(survey);
+                            }}
                             sx={{ mr: 1 }}
                           >
                             <LinkIcon fontSize="small" />
@@ -381,7 +492,10 @@ const Surveys = () => {
                         <Tooltip title="Edit Survey">
                           <IconButton 
                             size="small"
-                            onClick={() => handleOpenDialog(survey)}
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              handleOpenDialog(survey);
+                            }}
                             sx={{ mr: 1 }}
                           >
                             <EditIcon fontSize="small" />
@@ -391,7 +505,10 @@ const Surveys = () => {
                         <Tooltip title="Delete Survey">
                           <IconButton 
                             size="small"
-                            onClick={() => handleDeleteConfirm(survey.id)}
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              handleDeleteConfirm(survey.id);
+                            }}
                             color="error"
                           >
                             <DeleteIcon fontSize="small" />
@@ -487,17 +604,47 @@ const Surveys = () => {
               ))}
             </Select>
           </FormControl>
+
+          <Typography variant="h6" gutterBottom sx={{ mt: 4, mb: 2 }}>
+            AI Model Configuration
+          </Typography>
+          
+          <Typography variant="body2" color="text.secondary" paragraph>
+            Configure which AI models to use for different tasks in this survey. If not specified, the default model (GPT-3.5-turbo) will be used.
+          </Typography>
+
+          <LLMConfigSelector
+            task="intent_classification"
+            value={formData.llmConfigs.intent_classification}
+            onChange={(value) => handleLLMConfigChange('intent_classification', value)}
+          />
+
+          <LLMConfigSelector
+            task="response_generation"
+            value={formData.llmConfigs.response_generation}
+            onChange={(value) => handleLLMConfigChange('response_generation', value)}
+          />
+
+          <LLMConfigSelector
+            task="scoring"
+            value={formData.llmConfigs.scoring}
+            onChange={(value) => handleLLMConfigChange('scoring', value)}
+          />
+
+          <LLMConfigSelector
+            task="hint_generation"
+            value={formData.llmConfigs.hint_generation}
+            onChange={(value) => handleLLMConfigChange('hint_generation', value)}
+          />
         </DialogContent>
-        <DialogActions sx={{ px: 3, pb: 3 }}>
-          <Button onClick={handleCloseDialog} color="inherit">
-            Cancel
-          </Button>
-          <Button 
-            onClick={handleSubmit} 
+        <DialogActions>
+          <Button onClick={handleCloseDialog}>Cancel</Button>
+          <Button
+            onClick={handleSubmit}
             variant="contained"
-            disabled={!formData.title.trim() || formData.questions.length === 0}
+            disabled={!formData.title || formData.questions.length === 0}
           >
-            {editingSurvey ? 'Update' : 'Create'}
+            {editingSurvey ? 'Save Changes' : 'Create Survey'}
           </Button>
         </DialogActions>
       </Dialog>

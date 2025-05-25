@@ -13,6 +13,7 @@ import BarChartIcon from '@mui/icons-material/BarChart';
 import PeopleIcon from '@mui/icons-material/People';
 import TrendingUpIcon from '@mui/icons-material/TrendingUp';
 import RefreshIcon from '@mui/icons-material/Refresh';
+import SettingsIcon from '@mui/icons-material/Settings';
 
 // Components
 import StatCard from '../components/StatCard';
@@ -27,6 +28,7 @@ const Dashboard = () => {
   });
   const [recentSurveys, setRecentSurveys] = useState([]);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState(null);
   const { currentAdmin } = useAuth();
   const navigate = useNavigate();
 
@@ -34,16 +36,25 @@ const Dashboard = () => {
     const fetchDashboardData = async () => {
       try {
         setLoading(true);
+        setError(null);
+        const token = localStorage.getItem('token');
+        if (!token) {
+          setError('Please login to view dashboard');
+          return;
+        }
+
+        const headers = {
+          'x-auth-token': token
+        };
         
         // Fetch stats
-        const [questionsRes, surveysRes, evaluationsRes] = await Promise.all([
-          axios.get(`${import.meta.env.VITE_API_URL || 'http://localhost:5000'}/api/questions`),
-          axios.get(`${import.meta.env.VITE_API_URL || 'http://localhost:5000'}/api/surveys`),
-          axios.get(`${import.meta.env.VITE_API_URL || 'http://localhost:5000'}/api/evaluation`)
+        const [questionsRes, surveysRes, evaluationsRes, responsesRes] = await Promise.all([
+          axios.get(`${import.meta.env.VITE_API_URL || 'http://localhost:5000'}/api/question`, { headers }),
+          axios.get(`${import.meta.env.VITE_API_URL || 'http://localhost:5000'}/api/surveys`, { headers }),
+          axios.get(`${import.meta.env.VITE_API_URL || 'http://localhost:5000'}/api/evaluation`, { headers }),
+          axios.get(`${import.meta.env.VITE_API_URL || 'http://localhost:5000'}/api/responses/analytics/all`, { headers })
         ]);
         
-        // Calculate total responses
-        let totalResponses = 0;
         const surveys = surveysRes.data;
         
         // Get recent surveys (last 5)
@@ -53,26 +64,21 @@ const Dashboard = () => {
         
         setRecentSurveys(recent);
         
-        // For each survey, fetch response count
-        for (const survey of surveys) {
-          try {
-            const responsesRes = await axios.get(
-              `${import.meta.env.VITE_API_URL || 'http://localhost:5000'}/api/responses/survey/${survey.id}`
-            );
-            totalResponses += responsesRes.data.length;
-          } catch (err) {
-            console.error(`Error fetching responses for survey ${survey.id}:`, err);
-          }
-        }
-        
         setStats({
           questions: questionsRes.data.length,
           surveys: surveys.length,
-          responses: totalResponses,
+          responses: responsesRes.data.totalResponses || 0,
           evaluations: evaluationsRes.data.length
         });
       } catch (err) {
         console.error('Error fetching dashboard data:', err);
+        if (err.response?.status === 401) {
+          setError('Session expired. Please login again.');
+        } else if (err.response?.status === 404) {
+          setError('Some data could not be found. Please try again.');
+        } else {
+          setError('Failed to load dashboard data. Please try again.');
+        }
       } finally {
         setLoading(false);
       }
@@ -105,6 +111,23 @@ const Dashboard = () => {
     return (
       <Box sx={{ display: 'flex', justifyContent: 'center', alignItems: 'center', height: '50vh' }}>
         <CircularProgress />
+      </Box>
+    );
+  }
+
+  if (error) {
+    return (
+      <Box sx={{ display: 'flex', flexDirection: 'column', justifyContent: 'center', alignItems: 'center', height: '50vh' }}>
+        <Typography color="error" gutterBottom>
+          {error}
+        </Typography>
+        <Button 
+          variant="contained" 
+          onClick={() => window.location.reload()}
+          sx={{ mt: 2 }}
+        >
+          Retry
+        </Button>
       </Box>
     );
   }
@@ -249,12 +272,16 @@ const Dashboard = () => {
                 
                 <Grid item xs={12} sm={6} md={3}>
                   <Button 
-                    variant="outlined" 
+                    variant="contained" 
                     fullWidth 
-                    onClick={() => navigate('/surveys')}
-                    sx={{ py: 1.5 }}
+                    startIcon={<SettingsIcon />}
+                    onClick={() => navigate('/llm-config')}
+                    sx={{ 
+                      py: 1.5,
+                      background: 'linear-gradient(45deg, #00E096 30%, #00FFB2 90%)',
+                    }}
                   >
-                    View All Surveys
+                    LLM Config
                   </Button>
                 </Grid>
               </Grid>

@@ -198,14 +198,27 @@ exports.submitAnswer = async (req, res) => {
       currentQuestion = survey.Questions[questionIndex];
     }
 
-    // quality scoring
+    // Generate quality score
     const qualityScore = await AIService.scoreResponseQuality(
       currentQuestion.text,
       answer,
       currentQuestion.qualityGuidelines
     );
 
-    // save / overwrite answer
+    // Generate improvement hint if score is less than 5
+    const improvementHint = await AIService.generateImprovementHint(
+      currentQuestion.text,
+      answer,
+      qualityScore,
+      currentQuestion.qualityGuidelines
+    );
+
+    // Format the AI response with score and hint
+    const aiResponse = `Great—thanks! (Score: ${qualityScore}/5)${
+      improvementHint ? `\n\n${improvementHint}` : ''
+    }`;
+
+    // Save the answer with quality score and hint
     const answers = [...response.answers];
     const existingIdx = answers.findIndex(a => a.questionId === currentQuestion.id);
 
@@ -214,6 +227,7 @@ exports.submitAnswer = async (req, res) => {
       questionText: currentQuestion.text,
       answer,
       qualityScore,
+      improvementHint,
       timestamp: new Date()
     };
 
@@ -257,27 +271,13 @@ exports.submitAnswer = async (req, res) => {
     const allQuestionsAnswered = updatedCompleted.length === survey.Questions.length;
     const nextQuestion = allQuestionsAnswered ? null : survey.Questions[nextIdx];
 
-    let aiResponse = '';
-    if (!allQuestionsAnswered) {
-      aiResponse = await AIService.generateResponse(
-        `The user answered "${answer}" to "${currentQuestion.text}". Acknowledge them positively, then present the next question: "${nextQuestion.text}".`,
-        [],
-        'gpt-3.5-turbo'
-      );
-    } else {
-      aiResponse = await AIService.generateResponse(
-        `The user answered "${answer}" to "${currentQuestion.text}". Acknowledge them positively, then remind them they can review their answers using the list on the left and submit when ready.`,
-        [],
-        'gpt-3.5-turbo'
-      );
-    }
-
     return res.json({
       completed: false,
       allQuestionsAnswered,
       nextQuestion,
       aiResponse,
       qualityScore,
+      improvementHint,
       sessionData: response.sessionData,
       answers: response.answers,
       progress: { current: nextIdx + 1, total: survey.Questions.length }

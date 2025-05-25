@@ -204,6 +204,16 @@ const SurveyChat = () => {
         progress: res.data.progress
       }));
 
+      // Add acknowledgment message with score and hint
+      setMessages(prev => [
+        ...prev,
+        {
+          role: 'bot',
+          content: res.data.aiResponse,
+          skipTyped: true
+        }
+      ]);
+
       if (allQuestionsHandled) {
         setMessages(prev => [
           ...prev,
