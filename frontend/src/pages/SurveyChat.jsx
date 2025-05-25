@@ -1,3 +1,4 @@
+// SurveyChat.jsx
 import React, { useState, useEffect, useRef } from 'react';
 import {
   Box,
@@ -9,7 +10,7 @@ import {
   TextField,
   List,
   ListItem,
-  ListItemButton,
+  ListItemIcon,
   ListItemText,
   Drawer
 } from '@mui/material';
@@ -44,7 +45,10 @@ const SurveyChat = () => {
   const [typing, setTyping] = useState(false);
   const [questionStates, setQuestionStates] = useState({});
   const [hasAnswers, setHasAnswers] = useState(false);
-  const [chatHistory, setChatHistory] = useState({}); // keyed by question index
+
+  // Revision flow
+  const [waitingRevisionConfirmation, setWaitingRevisionConfirmation] = useState(null);
+  const [revisionTarget, setRevisionTarget] = useState(null);
 
   // REFS
   const messagesEndRef = useRef(null);
@@ -57,39 +61,36 @@ const SurveyChat = () => {
     const init = async () => {
       try {
         setLoading(true);
-
-        // 1. SURVEY
+        // 1. load survey
         const sRes = await axios.get(`${API_URL}/api/survey/${uniqueId}`);
         setSurvey(sRes.data);
         setMessages([
           {
             role: 'bot',
-            content: `Welcome to the "${sRes.data.title}" survey! ` +
-              `I'm ReadyBot – please answer each question thoughtfully. Let's begin!`
+            content: `Welcome to the "${sRes.data.title}" survey! I'm ReadyBot – please answer each question thoughtfully. Let's begin!`
           }
         ]);
 
-        // 2. SESSION
+        // 2. start session
         const sessRes = await axios.post(`${API_URL}/api/survey/${uniqueId}/start`);
         setResponseSession(sessRes.data);
-
+        // queue first question
+        // only enqueue first question if not already present
         setTyping(true);
         setTimeout(() => {
           setMessages(prev => {
-            const already = prev.some(
+            if (prev.some(
               m => m.isQuestion && m.content === sessRes.data.currentQuestion.text
-            );
-            return already
-              ? prev
-              : [
-                  ...prev,
-                  {
-                    role: 'bot',
-                    content: sessRes.data.currentQuestion.text,
-                    isQuestion: true,
-                    skipTyped: true
-                  }
-                ];
+            )) return prev;
+            return [
+              ...prev,
+              {
+                role: 'bot',
+                content: sessRes.data.currentQuestion.text,
+                isQuestion: true,
+                skipTyped: true
+              }
+            ];
           });
           setTyping(false);
         }, 1000);
@@ -115,130 +116,95 @@ const SurveyChat = () => {
   /* -------------------------------------------------- */
   useEffect(() => {
     const last = messages[messages.length - 1];
-    if (last && last.role === 'bot' && !last.isQuestion && !last.skipTyped && typedRef.current) {
+    if (
+      last &&
+      last.role === 'bot' &&
+      !last.isQuestion &&
+      !last.skipTyped &&
+      typedRef.current
+    ) {
       const opts = {
         strings: [last.content],
         typeSpeed: 32,
         showCursor: false,
         smartBackspace: false
       };
-      // cleanup old instance
       typedRef.current._typedInstance?.destroy();
       typedRef.current.innerHTML = '';
       typedRef.current._typedInstance = new Typed(typedRef.current, opts);
-      last.skipTyped = true; // prevent re-typing
+      last.skipTyped = true;
     }
   }, [messages]);
 
   /* -------------------------------------------------- */
-  /* Helpers                                            */
+  /* update sidebar state                               */
   /* -------------------------------------------------- */
   const updateQuestionStates = (sessionData, answers) => {
     if (!survey) return;
-  
-    // authoritative info coming from the API
-    const completedSet = new Set(sessionData?.completedQuestions ?? []);
-    const skippedSet   = new Set(sessionData?.skippedQuestions   ?? []);
-  
+    const completedSet = new Set(sessionData.completedQuestions || []);
+    const skippedSet = new Set(sessionData.skippedQuestions || []);
     const states = {};
     survey.Questions.forEach((q, idx) => {
-      const ansText = (answers.find(a => a.questionId === q.id)?.answer ?? '').trim();
-  
+      const ansText = (answers.find(a => a.questionId === q.id)?.answer || '').trim();
       states[idx] = {
         status: completedSet.has(idx)
-          ? 'completed'          // ✔  – confirmed by the server
+          ? 'completed'
           : skippedSet.has(idx)
-            ? 'skipped'          // ↷ – explicitly skipped
-            : 'pending',         // ○ – nothing yet
+          ? 'skipped'
+          : 'pending',
         answer: ansText
       };
     });
-  
     setQuestionStates(states);
-    setHasAnswers(completedSet.size > 0);   // submit enabled only when *truly* completed
+    setHasAnswers(completedSet.size > 0);
   };
 
   /* -------------------------------------------------- */
-  /* Submit ANSWER                                      */
+  /* Submit ANSWER (or revision)                        */
   /* -------------------------------------------------- */
-  const handleSubmitAnswer = async () => {
-    if (!userInput.trim() || submitting || !responseSession || !survey) return;
-
+  const handleSubmitAnswer = async (answerText, targetIdx = null) => {
+    if (!responseSession || !survey) return;
     try {
       setSubmitting(true);
       setError(null);
 
-      /* 1️⃣  show the user's message immediately */
-      const userMsg = { role: 'user', content: userInput };
-      setMessages(prev => [...prev, userMsg]);
-      setUserInput('');
+      // determine which question to send to
+      const questionIndex =
+        typeof targetIdx === 'number'
+          ? targetIdx
+          : responseSession.progress.current - 1;
 
-      /* 2️⃣  figure out which question we're answering        */
-      /*      (used for chat-history *and* for the API payload) */
-      const currentQuestionIndex = responseSession.progress.current - 1;
-
-      /* 3️⃣  persist chat history locally */
-      setChatHistory(prev => ({
-        ...prev,
-        [currentQuestionIndex]: [...(prev[currentQuestionIndex] || []), userMsg]
-      }));
-
-      /* 4️⃣  send the answer to the server                      */
+      // call API
       const res = await axios.post(
         `${API_URL}/api/survey/response/${responseSession.responseId}`,
         {
-          answer: userMsg.content,
+          answer: answerText,
           participantId: responseSession.participantId,
           action: 'answer',
-          targetQuestionIndex: currentQuestionIndex          // <-- key line
+          targetQuestionIndex: questionIndex
         }
       );
 
-      /* 5️⃣  refresh the sidebar states */
+      // update sidebar
       updateQuestionStates(res.data.sessionData, res.data.answers);
 
-      /* 6️⃣  bot reply + progress handling */
-      if (res.data.allQuestionsAnswered) {
-        // All questions now have answers, but we DO NOT auto-submit.
-        setResponseSession(prev => ({
-          ...prev,
-          currentQuestion: survey.Questions[res.data.sessionData.currentQuestionIndex],
-          progress: res.data.progress
-        }));
-
-        setMessages(prev => [
-          ...prev,
-          {
-            role: 'bot',
-            content:
-              res.data.aiResponse ||
-              'Great job - you\'ve answered every question! You can review your responses on the left and press "Submit Survey" whenever you\'re ready.',
-            skipTyped: true
-          }
-        ]);
-      } else {
-        // Move forward to the next unanswered question
-        setResponseSession(prev => ({
-          ...prev,
-          currentQuestion: res.data.nextQuestion,
-          progress: res.data.progress
-        }));
-
-        setMessages(prev => [
-          ...prev,
-          {
-            role: 'bot',
-            content: res.data.aiResponse,
-            skipTyped: true
-          },
-          {
-            role: 'bot',
-            content: res.data.nextQuestion.text,
-            isQuestion: true,
-            skipTyped: true
-          }
-        ]);
-      }
+      // update session and chat
+      // New: we’ve finished everything — ask to revise or submit
+      setMessages(prev => [
+        ...prev,
+        {
+          role: 'bot',
+          content:
+            '🎉 You’ve now gone through all questions! Would you like to revise any answer (e.g. “revise question 3”) or submit the survey now? ',
+          skipTyped: true
+        }
+      ]);
+      // stop advancing pointer — let user choose next action
+      setResponseSession(prev => ({
+        ...prev,
+        currentQuestion: null,
+        progress: res.data.progress
+      }));
     } catch (err) {
       console.error(err);
       setError('Failed to submit answer. Please try again.');
@@ -247,7 +213,6 @@ const SurveyChat = () => {
     }
   };
 
-
   /* -------------------------------------------------- */
   /* Skip Question                                      */
   /* -------------------------------------------------- */
@@ -255,28 +220,19 @@ const SurveyChat = () => {
     if (submitting || !responseSession) return;
     try {
       setSubmitting(true);
-
       const res = await axios.post(
         `${API_URL}/api/survey/response/${responseSession.responseId}`,
         { participantId: responseSession.participantId, action: 'skip' }
       );
-
       updateQuestionStates(res.data.sessionData, res.data.answers);
-
       setResponseSession(prev => ({
         ...prev,
         currentQuestion: res.data.nextQuestion,
         progress: res.data.progress
       }));
-
-      // feedback + next question
       setMessages(prev => [
         ...prev,
-        {
-          role: 'bot',
-          content: 'You chose to skip that question – we can return to it later.',
-          skipTyped: true
-        },
+        // { role: 'bot', content: 'Skipping this question— we can return later.', skipTyped: true },
         {
           role: 'bot',
           content: res.data.nextQuestion.text,
@@ -293,15 +249,13 @@ const SurveyChat = () => {
   };
 
   /* -------------------------------------------------- */
-  /* Navigate                                            */
+  /* Navigate Question                                  */
   /* -------------------------------------------------- */
   const handleNavigateQuestion = async targetIdx => {
     if (submitting || !responseSession) return;
-
     try {
       setSubmitting(true);
       setError(null);
-
       const res = await axios.post(
         `${API_URL}/api/survey/response/${responseSession.responseId}`,
         {
@@ -310,42 +264,29 @@ const SurveyChat = () => {
           targetQuestionIndex: targetIdx
         }
       );
-
       updateQuestionStates(res.data.sessionData, res.data.answers);
-
       setResponseSession(prev => ({
         ...prev,
         currentQuestion: res.data.nextQuestion,
         progress: res.data.progress
       }));
-
-      // rebuild chat stream for that question
-        const past = chatHistory[targetIdx] || [];
-        const prevText = (res.data.previousAnswer ?? '').toString();
-        const extra =
-          prevText !== ''
-            ? [
-              {
-                role: 'bot',
-                content: `Previous answer: ${prevText}`,
-                skipTyped: true
-              }
-            ]
-          : [];
-
-      setMessages([
-        ...past,
-        ...extra,
-        {
+      // show previous answer if any, then new prompt
+      const prev = res.data.previousAnswer || '';
+      const msgs = [];
+      if (prev) {
+        msgs.push({
           role: 'bot',
-          content: res.data.nextQuestion.text,
-          isQuestion: true,
+          content: `Your previous answer: ${prev}`,
           skipTyped: true
-        }
-      ]);
-
-      // pre-fill field with previous answer (no prefix) to allow quick editing
-      setUserInput(res.data.previousAnswer);
+        });
+      }
+      msgs.push({
+        role: 'bot',
+        content: res.data.nextQuestion.text,
+        isQuestion: true,
+        skipTyped: true
+      });
+      setMessages(prev => [...prev, ...msgs]);
     } catch (err) {
       console.error(err);
       setError('Failed to navigate to question. Please try again.');
@@ -355,112 +296,169 @@ const SurveyChat = () => {
   };
 
   /* -------------------------------------------------- */
-  /* FINAL SUBMIT                                       */
+  /* Final Submit                                       */
   /* -------------------------------------------------- */
   const handleFinalSubmit = async () => {
     if (submitting || !responseSession) return;
-
-    // Validate that we have at least one non-empty answer
-    const hasValidAnswers = Object.values(questionStates).some(
-      state => state.status === 'completed'
-    );
-
-    if (!hasValidAnswers) {
-      setError('Please provide at least one answer before submitting the survey.');
+    const hasValid = Object.values(questionStates).some(s => s.status === 'completed');
+    if (!hasValid) {
+      setError('Please answer at least one question before submitting.');
       return;
     }
-
     try {
       setSubmitting(true);
-      setError(null);
-
       const res = await axios.post(
         `${API_URL}/api/survey/response/${responseSession.responseId}/submit`,
         { participantId: responseSession.participantId }
       );
-
       if (res.data.completed) {
         setCompleted(true);
         setMessages(prev => [
           ...prev,
-          {
-            role: 'bot',
-            content: res.data.message || 'Thank you – your survey has been submitted successfully!'
-          }
+          { role: 'bot', content: res.data.message || 'Thank you—your survey is submitted!' }
         ]);
-        // Redirect to home after 3 seconds
-        setTimeout(() => {
-          window.location.href = '/';
-        }, 3000);
-      } else {
-        throw new Error('Survey submission was not completed successfully');
+        setTimeout(() => (window.location.href = '/'), 3000);
       }
     } catch (err) {
-      console.error('Survey submission error:', err);
-      const errorMessage = err.response?.data?.message || 'Failed to submit survey. Please try again.';
-      setError(errorMessage);
+      console.error(err);
+      setError(err.response?.data?.message || 'Failed to submit survey.');
       setSubmitting(false);
-      
-      // If survey is already submitted, redirect to home
-      if (err.response?.status === 400 && err.response?.data?.message === 'Survey has already been submitted') {
-        setTimeout(() => {
-          window.location.href = '/';
-        }, 3000);
-      }
     }
   };
 
   /* -------------------------------------------------- */
-  /* Render helpers                                     */
+  /* Main natural-language handler                      */
+  /* -------------------------------------------------- */
+  const handleUserMessage = async () => {
+    const text = userInput.trim();
+    if (!text || submitting) return;
+
+    // echo user
+    setMessages(prev => [...prev, { role: 'user', content: text }]);
+    setUserInput('');
+
+    // 1) handle revision yes/no
+    if (waitingRevisionConfirmation !== null) {
+      const qNum = waitingRevisionConfirmation + 1;
+      if (/^(yes|y)$/i.test(text)) {
+        setRevisionTarget(waitingRevisionConfirmation);
+        setWaitingRevisionConfirmation(null);
+        setMessages(prev => [
+          ...prev,
+          {
+            role: 'bot',
+            content: `Sure—please enter your new answer for Question ${qNum}.`,
+            skipTyped: true
+          }
+        ]);
+      } else if (/^(no|n)$/i.test(text)) {
+        setWaitingRevisionConfirmation(null);
+        setMessages(prev => [
+          ...prev,
+          { role: 'bot', content: `Okay. What would you like to do next?`, skipTyped: true }
+        ]);
+      } else {
+        setMessages(prev => [
+          ...prev,
+          {
+            role: 'bot',
+            content: `Please answer "yes" or "no". Do you want to update your answer to Question ${qNum}?`,
+            skipTyped: true
+          }
+        ]);
+      }
+      return;
+    }
+
+    // 2) navigation / revision request
+    let m;
+    if ((m = text.match(/^go to question (\d+)/i)) || (m = text.match(/^revise question (\d+)/i))) {
+      const qNum = parseInt(m[1], 10);
+      if (!survey || qNum < 1 || qNum > survey.Questions.length) {
+        setMessages(prev => [
+          ...prev,
+          {
+            role: 'bot',
+            content: `Invalid question number. Choose between 1 and ${survey?.Questions.length}.`,
+            skipTyped: true
+          }
+        ]);
+      } else {
+        setMessages(prev => [
+          ...prev,
+          { role: 'bot', content: `Navigating to Question ${qNum}...`, skipTyped: true }
+        ]);
+        await handleNavigateQuestion(qNum - 1);
+        setWaitingRevisionConfirmation(qNum - 1);
+        setMessages(prev => [
+          ...prev,
+          {
+            role: 'bot',
+            content: `Would you like to update your previous answer to Question ${qNum}? (yes/no)`,
+            skipTyped: true
+          }
+        ]);
+      }
+      return;
+    }
+
+    // 3) skip / next
+    if (/^skip(question)?$/i.test(text) || /^next question$/i.test(text)) {
+      setMessages(prev => [...prev, { role: 'bot', content: `Skipping this question...`, skipTyped: true }]);
+      await handleSkipQuestion();
+      return;
+    }
+
+    // 4) it's an answer
+    if (revisionTarget !== null) {
+      await handleSubmitAnswer(text, revisionTarget);
+      setRevisionTarget(null);
+    } else {
+      await handleSubmitAnswer(text);
+    }
+  };
+
+  /* -------------------------------------------------- */
+  /* Sidebar                                          */
   /* -------------------------------------------------- */
   const renderQuestionList = () => {
     if (!survey) return null;
-
     const done = Object.values(questionStates).filter(s => s.status === 'completed').length;
     const total = survey.Questions.length;
-
     return (
       <Box sx={{ width: 280, display: 'flex', flexDirection: 'column', height: '100%' }}>
-        {/* header */}
         <Box sx={{ p: 2, borderBottom: 1, borderColor: 'divider' }}>
           <Typography variant="h6">Questions</Typography>
           <Typography variant="body2" color="text.secondary">
             {done} of {total} completed
           </Typography>
         </Box>
-
-        {/* list */}
         <List sx={{ flexGrow: 1, overflowY: 'auto' }}>
           {survey.Questions.map((q, idx) => {
             const state = questionStates[idx] || { status: 'pending' };
             const current = responseSession?.progress.current === idx + 1;
-
+            let Icon = RadioButtonUncheckedIcon;
+            if (state.status === 'completed') Icon = CheckCircleIcon;
+            if (state.status === 'skipped') Icon = SkipNextIcon;
             return (
-              <ListItem key={idx} disablePadding>
-                <ListItemButton
-                  disabled={!responseSession || submitting || completed}
-                  selected={current}
-                  onClick={() => handleNavigateQuestion(idx)}
-                >
-                  {state.status === 'completed' ? (
-                    <CheckCircleIcon color="success" sx={{ mr: 1 }} />
-                  ) : state.status === 'skipped' ? (
-                    <SkipNextIcon color="warning" sx={{ mr: 1 }} />
-                  ) : (
-                    <RadioButtonUncheckedIcon color="disabled" sx={{ mr: 1 }} />
-                  )}
-
-                  <ListItemText
-                    primary={`Question ${idx + 1}`}
-                    secondary={state.status.charAt(0).toUpperCase() + state.status.slice(1)}
-                  />
-                </ListItemButton>
+              <ListItem
+                key={idx}
+                selected={current}
+                sx={{
+                  bgcolor: current ? 'action.selected' : 'inherit'
+                }}
+              >
+                <ListItemIcon>
+                  <Icon color={state.status === 'pending' ? 'disabled' : state.status === 'completed' ? 'success' : 'warning'} />
+                </ListItemIcon>
+                <ListItemText
+                  primary={`Question ${idx + 1}`}
+                  secondary={state.status.charAt(0).toUpperCase() + state.status.slice(1)}
+                />
               </ListItem>
             );
           })}
         </List>
-
-        {/* submit button */}
         {hasAnswers && !completed && (
           <Box sx={{ p: 2, borderTop: 1, borderColor: 'divider' }}>
             <Button
@@ -478,7 +476,7 @@ const SurveyChat = () => {
   };
 
   /* -------------------------------------------------- */
-  /* MAIN RENDER                                        */
+  /* Main Render                                        */
   /* -------------------------------------------------- */
   if (loading) {
     return (
@@ -487,10 +485,17 @@ const SurveyChat = () => {
       </Box>
     );
   }
-
   if (error && !responseSession) {
     return (
-      <Box sx={{ display: 'flex', height: '100vh', justifyContent: 'center', alignItems: 'center', p: 3 }}>
+      <Box
+        sx={{
+          display: 'flex',
+          height: '100vh',
+          justifyContent: 'center',
+          alignItems: 'center',
+          p: 3
+        }}
+      >
         <Paper sx={{ p: 4, borderRadius: 3, textAlign: 'center', maxWidth: 500 }} elevation={3}>
           <Typography variant="h5" gutterBottom sx={{ fontWeight: 600, color: 'error.main' }}>
             Survey Not Available
@@ -503,10 +508,9 @@ const SurveyChat = () => {
       </Box>
     );
   }
-
   return (
     <Box sx={{ display: 'flex', height: '100vh' }}>
-      {/* SIDEBAR */}
+      {/* Sidebar */}
       <Drawer
         variant="permanent"
         sx={{
@@ -518,7 +522,7 @@ const SurveyChat = () => {
         {renderQuestionList()}
       </Drawer>
 
-      {/* CHAT */}
+      {/* Chat Area */}
       <Box sx={{ flexGrow: 1, display: 'flex', flexDirection: 'column' }}>
         {/* header */}
         <Box sx={{ p: 2, borderBottom: 1, borderColor: 'divider', bgcolor: 'background.paper' }}>
@@ -537,14 +541,14 @@ const SurveyChat = () => {
           </Box>
         </Box>
 
-        {/* possible inline error */}
+        {/* inline error */}
         {error && responseSession && (
           <Box sx={{ p: 1, bgcolor: 'error.light', color: 'error.contrastText' }}>
             <Typography variant="body2">{error}</Typography>
           </Box>
         )}
 
-        {/* message area */}
+        {/* messages */}
         <Box sx={{ flexGrow: 1, overflowY: 'auto', p: 2, bgcolor: '#f5f7fa' }}>
           <Box sx={{ maxWidth: 800, mx: 'auto' }}>
             {messages.map((m, idx) => (
@@ -583,42 +587,35 @@ const SurveyChat = () => {
           </Box>
         </Box>
 
-        {/* input row */}
+        {/* input */}
         {!completed && (
           <Box sx={{ p: 2, borderTop: 1, borderColor: 'divider', bgcolor: 'background.paper' }}>
-            <Box sx={{ maxWidth: 800, mx: 'auto' }}>
-              <Box sx={{ display: 'flex', gap: 1 }}>
-                <TextField
-                  fullWidth
-                  placeholder="Type your answer here..."
-                  multiline
-                  maxRows={4}
-                  value={userInput}
-                  onChange={e => setUserInput(e.target.value)}
-                  disabled={submitting}
-                  variant="outlined"
-                  sx={{ '& .MuiOutlinedInput-root': { borderRadius: 3 } }}
-                />
-                <Button
-                  variant="contained"
-                  disabled={!userInput.trim() || submitting}
-                  onClick={handleSubmitAnswer}
-                  sx={{ minWidth: 100 }}
-                >
-                  {submitting ? <CircularProgress size={22} /> : <SendIcon />}
-                </Button>
-              </Box>
-              {/* optional skip button */}
-              {!questionStates[responseSession?.progress.current - 1]?.status?.startsWith('completed') && (
-                <Button
-                  onClick={handleSkipQuestion}
-                  disabled={submitting}
-                  size="small"
-                  sx={{ mt: 1 }}
-                >
-                  Skip this question
-                </Button>
-              )}
+            <Box sx={{ maxWidth: 800, mx: 'auto', display: 'flex', gap: 1 }}>
+              <TextField
+                fullWidth
+                placeholder="Type here…"
+                multiline
+                maxRows={4}
+                value={userInput}
+                onChange={e => setUserInput(e.target.value)}
+                onKeyDown={e => {
+                  if (e.key === 'Enter' && !e.shiftKey) {
+                    e.preventDefault();
+                    handleUserMessage();
+                  }
+                }}
+                disabled={submitting}
+                variant="outlined"
+                sx={{ '& .MuiOutlinedInput-root': { borderRadius: 3 } }}
+              />
+              <Button
+                variant="contained"
+                disabled={!userInput.trim() || submitting}
+                onClick={handleUserMessage}
+                sx={{ minWidth: 100 }}
+              >
+                {submitting ? <CircularProgress size={22} /> : <SendIcon />}
+              </Button>
             </Box>
           </Box>
         )}
