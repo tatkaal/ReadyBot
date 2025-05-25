@@ -17,4 +17,9 @@ router.post('/:uniqueId/start', surveyPublicController.startSurveySession);
 // @access  Public
 router.post('/response/:responseId', surveyPublicController.submitAnswer);
 
+// @route   POST api/survey/response/:responseId/submit
+// @desc    Submit the entire survey
+// @access  Public
+router.post('/response/:responseId/submit', surveyPublicController.submitSurvey);
+
 module.exports = router;

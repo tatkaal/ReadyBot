@@ -65,7 +65,7 @@ const SurveyChat = () => {
           {
             role: 'bot',
             content: `Welcome to the “${sRes.data.title}” survey! ` +
-              `I'm ReadyBot – please answer each question thoughtfully. Let’s begin!`
+              `I'm ReadyBot – please answer each question thoughtfully. Let's begin!`
           }
         ]);
 
@@ -75,15 +75,22 @@ const SurveyChat = () => {
 
         setTyping(true);
         setTimeout(() => {
-          setMessages(prev => [
-            ...prev,
-            {
-              role: 'bot',
-              content: sessRes.data.currentQuestion.text,
-              isQuestion: true,
-              skipTyped: true
-            }
-          ]);
+          setMessages(prev => {
+            const already = prev.some(
+              m => m.isQuestion && m.content === sessRes.data.currentQuestion.text
+            );
+            return already
+              ? prev
+              : [
+                  ...prev,
+                  {
+                    role: 'bot',
+                    content: sessRes.data.currentQuestion.text,
+                    isQuestion: true,
+                    skipTyped: true
+                  }
+                ];
+          });
           setTyping(false);
         }, 1000);
       } catch (err) {
@@ -128,29 +135,27 @@ const SurveyChat = () => {
   /* -------------------------------------------------- */
   const updateQuestionStates = (sessionData, answers) => {
     if (!survey) return;
-
+  
+    // authoritative info coming from the API
+    const completedSet = new Set(sessionData?.completedQuestions ?? []);
+    const skippedSet   = new Set(sessionData?.skippedQuestions   ?? []);
+  
     const states = {};
     survey.Questions.forEach((q, idx) => {
-      const completed = sessionData.completedQuestions?.includes(idx);
-      const skipped = sessionData.skippedQuestions?.includes(idx);
-      const stored = answers.some(a => a.questionId === q.id);
-
+      const ansText = (answers.find(a => a.questionId === q.id)?.answer ?? '').trim();
+  
       states[idx] = {
-        status: completed
-          ? 'completed'
-          : skipped
-            ? 'skipped'
-            : stored
-              ? 'answered'
-              : 'pending',
-        answer: answers.find(a => a.questionId === q.id)?.answer || ''
+        status: completedSet.has(idx)
+          ? 'completed'          // ✔  – confirmed by the server
+          : skippedSet.has(idx)
+            ? 'skipped'          // ↷ – explicitly skipped
+            : 'pending',         // ○ – nothing yet
+        answer: ansText
       };
     });
-
+  
     setQuestionStates(states);
-    setHasAnswers(
-      Object.values(states).some(s => ['answered', 'completed'].includes(s.status))
-    );
+    setHasAnswers(completedSet.size > 0);   // submit enabled only when *truly* completed
   };
 
   /* -------------------------------------------------- */
@@ -167,16 +172,24 @@ const SurveyChat = () => {
       setMessages(prev => [...prev, userMsg]);
       setUserInput('');
 
+      // Get the actual current question index from the response session's currentQuestion
+      const currentQuestionIndex = survey.Questions.findIndex(
+        q => q.id === responseSession.currentQuestion.id
+      );
+
       const res = await axios.post(
         `${API_URL}/api/survey/response/${responseSession.responseId}`,
-        { answer: userMsg.content, participantId: responseSession.participantId }
+        { 
+          answer: userMsg.content, 
+          participantId: responseSession.participantId,
+          action: 'answer'
+        }
       );
 
       // persist chat history
-      const qIdx = responseSession.progress.current - 1;
       setChatHistory(prev => ({
         ...prev,
-        [qIdx]: [...(prev[qIdx] || []), userMsg]
+        [currentQuestionIndex]: [...(prev[currentQuestionIndex] || []), userMsg]
       }));
 
       // update state flags
@@ -196,34 +209,53 @@ const SurveyChat = () => {
             content:
               res.data.aiResponse ||
               'Great job – you have answered every question! You can still review ' +
-              'your responses using the list on the left and press “Submit Survey” whenever you are ready.',
+              'your responses using the list on the left and press "Submit Survey" whenever you are ready.',
             skipTyped: true
           }
         ]);
         return;
       }
 
-      // normal flow – move to next question
-      setResponseSession(prev => ({
-        ...prev,
-        currentQuestion: res.data.nextQuestion,
-        progress: res.data.progress
-      }));
+      // Move to next question if not all questions are answered
+      const nextQuestionIndex = currentQuestionIndex + 1;
+      if (nextQuestionIndex < survey.Questions.length) {
+        setResponseSession(prev => ({
+          ...prev,
+          currentQuestion: res.data.nextQuestion,
+          progress: { ...prev.progress, current: nextQuestionIndex + 1 }
+        }));
 
-      setMessages(prev => [
-        ...prev,
-        {
-          role: 'bot',
-          content: res.data.aiResponse,
-          skipTyped: true
-        },
-        {
-          role: 'bot',
-          content: res.data.nextQuestion.text,
-          isQuestion: true,
-          skipTyped: true
-        }
-      ]);
+        setMessages(prev => [
+          ...prev,
+          {
+            role: 'bot',
+            content: res.data.aiResponse,
+            skipTyped: true
+          },
+          {
+            role: 'bot',
+            content: res.data.nextQuestion.text,
+            isQuestion: true,
+            skipTyped: true
+          }
+        ]);
+      } else {
+        // Stay on current question if it's the last one
+        setResponseSession(prev => ({
+          ...prev,
+          currentQuestion: res.data.nextQuestion,
+          progress: res.data.progress
+        }));
+
+        setMessages(prev => [
+          ...prev,
+          {
+            role: 'bot',
+            content: res.data.aiResponse,
+            skipTyped: true
+          }
+        ]);
+      }
     } catch (err) {
       console.error(err);
       setError('Failed to submit answer. Please try again.');
@@ -304,13 +336,14 @@ const SurveyChat = () => {
       }));
 
       // rebuild chat stream for that question
-      const past = chatHistory[targetIdx] || [];
-      const extra =
-        res.data.previousAnswer.trim() !== ''
-          ? [
+        const past = chatHistory[targetIdx] || [];
+        const prevText = (res.data.previousAnswer ?? '').toString();
+        const extra =
+          prevText !== ''
+            ? [
               {
                 role: 'bot',
-                content: `Previous answer: ${res.data.previousAnswer}`,
+                content: `Previous answer: ${prevText}`,
                 skipTyped: true
               }
             ]
@@ -342,28 +375,54 @@ const SurveyChat = () => {
   /* -------------------------------------------------- */
   const handleFinalSubmit = async () => {
     if (submitting || !responseSession) return;
+
+    // Validate that we have at least one non-empty answer
+    const hasValidAnswers = Object.values(questionStates).some(
+      state => state.status === 'completed'
+    );
+
+    if (!hasValidAnswers) {
+      setError('Please provide at least one answer before submitting the survey.');
+      return;
+    }
+
     try {
       setSubmitting(true);
       setError(null);
 
-      await axios.post(
+      const res = await axios.post(
         `${API_URL}/api/survey/response/${responseSession.responseId}/submit`,
         { participantId: responseSession.participantId }
       );
 
-      setCompleted(true);
-      setMessages(prev => [
-        ...prev,
-        {
-          role: 'bot',
-          content: 'Thank you – your survey has been submitted successfully!'
-        }
-      ]);
+      if (res.data.completed) {
+        setCompleted(true);
+        setMessages(prev => [
+          ...prev,
+          {
+            role: 'bot',
+            content: res.data.message || 'Thank you – your survey has been submitted successfully!'
+          }
+        ]);
+        // Redirect to home after 3 seconds
+        setTimeout(() => {
+          window.location.href = '/';
+        }, 3000);
+      } else {
+        throw new Error('Survey submission was not completed successfully');
+      }
     } catch (err) {
-      console.error(err);
-      setError('Failed to submit survey. Please try again.');
-    } finally {
+      console.error('Survey submission error:', err);
+      const errorMessage = err.response?.data?.message || 'Failed to submit survey. Please try again.';
+      setError(errorMessage);
       setSubmitting(false);
+      
+      // If survey is already submitted, redirect to home
+      if (err.response?.status === 400 && err.response?.data?.message === 'Survey has already been submitted') {
+        setTimeout(() => {
+          window.location.href = '/';
+        }, 3000);
+      }
     }
   };
 
@@ -395,7 +454,7 @@ const SurveyChat = () => {
             return (
               <ListItem key={idx} disablePadding>
                 <ListItemButton
-                  disabled={!responseSession || submitting}
+                  disabled={!responseSession || submitting || completed}
                   selected={current}
                   onClick={() => handleNavigateQuestion(idx)}
                 >
@@ -403,19 +462,13 @@ const SurveyChat = () => {
                     <CheckCircleIcon color="success" sx={{ mr: 1 }} />
                   ) : state.status === 'skipped' ? (
                     <SkipNextIcon color="warning" sx={{ mr: 1 }} />
-                  ) : state.status === 'answered' ? (
-                    <RadioButtonUncheckedIcon color="primary" sx={{ mr: 1 }} />
                   ) : (
                     <RadioButtonUncheckedIcon color="disabled" sx={{ mr: 1 }} />
                   )}
 
                   <ListItemText
                     primary={`Question ${idx + 1}`}
-                    secondary={
-                      state.status === 'answered'
-                        ? 'Answered'
-                        : state.status.charAt(0).toUpperCase() + state.status.slice(1)
-                    }
+                    secondary={state.status.charAt(0).toUpperCase() + state.status.slice(1)}
                   />
                 </ListItemButton>
               </ListItem>

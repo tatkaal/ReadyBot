@@ -30,7 +30,7 @@ exports.getSurveyByUniqueId = async (req, res) => {
 
 /**
  * POST /api/survey/:uniqueId/start
- * Creates a fresh Response “session”
+ * Creates a fresh Response "session"
  */
 exports.startSurveySession = async (req, res) => {
   try {
@@ -111,27 +111,59 @@ exports.submitAnswer = async (req, res) => {
       return res.status(404).json({ message: 'Survey not found' });
     }
 
-    // convenience handles
-    const { currentQuestionIndex, completedQuestions = [], skippedQuestions = [] } = response.sessionData;
-    const currentQuestion = survey.Questions[currentQuestionIndex];
+    // ---------------------------------------------------------------------
+    // Which question are we working on?
+    // ---------------------------------------------------------------------
+    let questionIndex = response.sessionData.currentQuestionIndex;
 
+    if (action === 'navigate') {
+      if (
+        typeof targetQuestionIndex !== 'number' ||
+        targetQuestionIndex < 0 ||
+        targetQuestionIndex >= survey.Questions.length
+      ) {
+        await t.rollback();
+        return res.status(400).json({ message: 'Invalid question index' });
+      }
+
+      questionIndex = targetQuestionIndex;
+      response.sessionData.currentQuestionIndex = questionIndex;
+      await response.save({ transaction: t });
+      await t.commit();
+
+      const targetQ  = survey.Questions[questionIndex];
+      const prevAns  = response.answers.find(a => a.questionId === targetQ.id);
+
+      return res.json({
+        completed: false,
+        allQuestionsAnswered: false,
+        nextQuestion: targetQ,
+        previousAnswer: prevAns?.answer || '',
+        action: 'navigated',
+        sessionData: response.sessionData,
+        answers: response.answers,
+        progress: { current: questionIndex + 1, total: survey.Questions.length }
+      });
+    }
+
+    const currentQuestion = survey.Questions[questionIndex];
     if (!currentQuestion) {
       await t.rollback();
       return res.status(400).json({ message: 'No current question found' });
     }
 
     /**
-     * -----------------
-     *  ACTION:  SKIP
-     * -----------------
+     * -----------------------------------------------------------------
+     * ACTION: SKIP
+     * -----------------------------------------------------------------
      */
     if (action === 'skip') {
-      const updatedSkipped = [...skippedQuestions, currentQuestionIndex];
-      const nextIdx = currentQuestionIndex + 1;
+      const updatedSkipped = [...new Set([...response.sessionData.skippedQuestions, questionIndex])];
+      const nextIdx = questionIndex + 1;
 
       response.sessionData = {
         currentQuestionIndex: nextIdx,
-        completedQuestions,
+        completedQuestions: response.sessionData.completedQuestions,
         skippedQuestions: updatedSkipped
       };
 
@@ -150,43 +182,9 @@ exports.submitAnswer = async (req, res) => {
     }
 
     /**
-     * -----------------
-     *  ACTION:  NAVIGATE
-     * -----------------
-     */
-    if (action === 'navigate') {
-      if (
-        typeof targetQuestionIndex !== 'number' ||
-        targetQuestionIndex < 0 ||
-        targetQuestionIndex >= survey.Questions.length
-      ) {
-        await t.rollback();
-        return res.status(400).json({ message: 'Invalid question index' });
-      }
-
-      response.sessionData.currentQuestionIndex = targetQuestionIndex;
-      await response.save({ transaction: t });
-      await t.commit();
-
-      const targetQ = survey.Questions[targetQuestionIndex];
-      const prevAns = response.answers.find(a => a.questionId === targetQ.id);
-
-      return res.json({
-        completed: false,
-        allQuestionsAnswered: false,
-        nextQuestion: targetQ,
-        previousAnswer: prevAns?.answer || '',
-        action: 'navigated',
-        sessionData: response.sessionData,
-        answers: response.answers,
-        progress: { current: targetQuestionIndex + 1, total: survey.Questions.length }
-      });
-    }
-
-    /**
-     * -----------------
-     *  ACTION:  ANSWER
-     * -----------------
+     * -----------------------------------------------------------------
+     * ACTION: ANSWER
+     * -----------------------------------------------------------------
      */
     if (!answer) {
       await t.rollback();
@@ -215,56 +213,61 @@ exports.submitAnswer = async (req, res) => {
     if (existingIdx !== -1) answers[existingIdx] = newAnswerObj;
     else answers.push(newAnswerObj);
 
-    // update sessionData
-    const updatedCompleted = [...completedQuestions];
-    if (!updatedCompleted.includes(currentQuestionIndex)) updatedCompleted.push(currentQuestionIndex);
+    // recompute completed list
+    const updatedCompleted = survey.Questions
+      .map((q, idx) => {
+        const a = answers.find(ans => ans.questionId === q.id);
+        return a && a.answer && a.answer.trim() !== '' ? idx : null;
+      })
+      .filter(idx => idx !== null);
 
-    // next incomplete
-    let nextIdx = currentQuestionIndex + 1;
-    while (
-      nextIdx < survey.Questions.length &&
-      (updatedCompleted.includes(nextIdx) ||
-        answers.some(a => a.questionId === survey.Questions[nextIdx].id))
-    ) {
+    // -----------------------------------------------------------------
+    // decide where the pointer should go next
+    // -----------------------------------------------------------------
+    let nextIdx = questionIndex + 1;
+    while (nextIdx < survey.Questions.length && updatedCompleted.includes(nextIdx)) {
       nextIdx += 1;
     }
+    // if we ran off the end, keep the pointer on the last question
+    if (nextIdx >= survey.Questions.length) nextIdx = questionIndex;
 
     response.answers = answers;
     response.sessionData = {
       currentQuestionIndex: nextIdx,
       completedQuestions: updatedCompleted,
-      skippedQuestions
+      skippedQuestions: response.sessionData.skippedQuestions
     };
-
     await response.save({ transaction: t });
     await t.commit();
 
-    // Outcome flags / values
-    const allQuestionsAnswered = nextIdx >= survey.Questions.length;
-    let nextQuestion = null;
-    let aiResponse = '';
+    // build reply
+    const allQuestionsAnswered = updatedCompleted.length === survey.Questions.length;
+    const nextQuestion = allQuestionsAnswered ? null : survey.Questions[nextIdx];
 
+    let aiResponse = '';
     if (!allQuestionsAnswered) {
-      nextQuestion = survey.Questions[nextIdx];
       aiResponse = await AIService.generateResponse(
         `The user answered "${answer}" to "${currentQuestion.text}". Acknowledge them positively, then present the next question: "${nextQuestion.text}".`,
+        [],
+        'gpt-3.5-turbo'
+      );
+    } else {
+      aiResponse = await AIService.generateResponse(
+        `The user answered "${answer}" to "${currentQuestion.text}". Acknowledge them positively, then remind them they can review their answers using the list on the left and submit when ready.`,
         [],
         'gpt-3.5-turbo'
       );
     }
 
     return res.json({
-      completed: false,                  // never auto-completes anymore
+      completed: false,
       allQuestionsAnswered,
-      nextQuestion,                      // null when finished
+      nextQuestion,
       aiResponse,
       qualityScore,
       sessionData: response.sessionData,
       answers: response.answers,
-      progress: {
-        current: Math.min(nextIdx + 1, survey.Questions.length),
-        total: survey.Questions.length
-      }
+      progress: { current: nextIdx + 1, total: survey.Questions.length }
     });
   } catch (err) {
     await t.rollback();
@@ -275,7 +278,7 @@ exports.submitAnswer = async (req, res) => {
 
 /**
  * POST /api/survey/response/:responseId/submit
- * Explicit “Submit Survey” call – marks the response finished
+ * Explicit "Submit Survey" call – marks the response finished
  */
 exports.submitSurvey = async (req, res) => {
   const t = await sequelize.transaction();
@@ -299,11 +302,36 @@ exports.submitSurvey = async (req, res) => {
       return res.status(403).json({ message: 'Invalid participant ID' });
     }
 
+    if (response.completedAt) {
+      await t.rollback();
+      return res.status(400).json({ message: 'Survey has already been submitted' });
+    }
+
+    if (!response.answers || response.answers.length === 0) {
+      await t.rollback();
+      return res.status(400).json({ message: 'Cannot submit survey without any answers' });
+    }
+
+    const hasValidAnswers = response.answers.some(
+      a => a.answer && a.answer.trim() !== ''
+    );
+    if (!hasValidAnswers) {
+      await t.rollback();
+      return res.status(400).json({ message: 'Please provide at least one answer before submitting the survey' });
+    }
+
     response.completedAt = new Date();
     await response.save({ transaction: t });
     await t.commit();
 
-    return res.json({ completed: true, message: 'Survey completed successfully' });
+    return res.json({
+      completed: true,
+      message: 'Survey completed successfully',
+      responseId: response.id,
+      participantId: response.participantId,
+      completedAt: response.completedAt,
+      answerCount: response.answers.length
+    });
   } catch (err) {
     await t.rollback();
     console.error('Submit survey error:', err);

@@ -248,8 +248,89 @@ Ensure all required environment variables are set in production:
 ### Development Guidelines
 - Follow the existing code style
 - Write meaningful commit messages
-- Add tests for new features
-- Update documentation as needed
+
+## ❓ Frequently Asked Questions
+
+### AI Scoring and Quality Guidelines
+
+#### How does ReadyBot score survey responses?
+ReadyBot uses OpenAI's GPT-3.5-turbo model with a specialized prompt engineering approach to score responses. The technical implementation includes:
+
+1. **Scoring Process**:
+   - Each response is evaluated using a structured prompt template
+   - The model is configured with:
+     - Temperature: 0.3 (for consistent scoring)
+     - Max tokens: 10 (to ensure single number output)
+   - The prompt includes:
+     - The original question
+     - The user's response
+     - Quality guidelines (if provided)
+     - Clear scoring criteria
+
+2. **Scoring Scale (1-5)**:
+   - 1 = Very poor quality (minimal effort, irrelevant)
+   - 2 = Poor quality (short, vague, or partially irrelevant)
+   - 3 = Acceptable quality (addresses the question but lacks depth)
+   - 4 = Good quality (thoughtful, relevant, and somewhat detailed)
+   - 5 = Excellent quality (comprehensive, insightful, and very detailed)
+
+3. **Error Handling**:
+   - If scoring fails, defaults to middle score (3)
+   - Score is always clamped between 1-5
+   - Response parsing uses regex to extract numeric score
+
+#### How are quality guidelines used in scoring?
+The quality guidelines are integrated into the scoring process through prompt engineering:
+
+1. **Guideline Integration**:
+   - Guidelines are stored in the Question model's `qualityGuidelines` field
+   - When scoring, guidelines are injected into the prompt template
+   - The AI model uses these guidelines as specific evaluation criteria
+
+2. **Technical Implementation**:
+   ```javascript
+   const prompt = `
+     You are an AI quality evaluator. Your task is to score the quality of a response to a survey question.
+     
+     Question: ${question}
+     
+     Response: ${answer}
+     
+     ${guidelines ? `Quality Guidelines: ${guidelines}` : ''}
+     
+     Please evaluate the response quality on a scale of 1-5...
+   `;
+   ```
+
+3. **Example Guidelines**:
+   - "Look for detailed responses that mention specific experiences"
+   - "High-quality answers should mention multiple features and explain why they are important"
+   - "Look for thoughtful considerations of both benefits and potential concerns"
+
+#### What happens for questions without quality guidelines?
+For questions without guidelines, the system uses a fallback scoring mechanism:
+
+1. **Default Evaluation**:
+   - Uses general quality metrics in the prompt
+   - Evaluates based on:
+     - Relevance to the question
+     - Response length and detail
+     - Thoughtfulness and insight
+   - Same technical implementation but without specific guidelines
+
+2. **Scoring Consistency**:
+   - Maintains the same 1-5 scale
+   - Uses identical model parameters (temperature: 0.3)
+   - Applies the same error handling and score clamping
+
+3. **Analytics Integration**:
+   - Scores are stored in the Response model's `answers` array
+   - Each answer object includes:
+     - `questionId`
+     - `questionText`
+     - `answer`
+     - `qualityScore`
+     - `timestamp`
 
 ## 📄 License
 
