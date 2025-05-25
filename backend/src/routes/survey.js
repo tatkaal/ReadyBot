@@ -22,4 +22,9 @@ router.post('/response/:responseId', surveyPublicController.submitAnswer);
 // @access  Public
 router.post('/response/:responseId/submit', surveyPublicController.submitSurvey);
 
+// @route   POST api/survey/intent
+// @desc    Classify user intent from message
+// @access  Public
+router.post('/intent', surveyPublicController.classifyIntent);
+
 module.exports = router;

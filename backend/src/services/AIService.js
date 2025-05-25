@@ -7,6 +7,47 @@ dotenv.config();
 const OpenAI = require('openai');
 const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
 
+const intentSchema = {
+  name: "IntentClassification",
+  strict: true,
+  schema: {
+    type: "object",
+    properties: {
+      intent: {
+        type: "string",
+        enum: [
+          "ANSWER_QUESTION",
+          "NAVIGATE_TO_QUESTION",
+          "REVISE_ANSWER",
+          "SKIP_QUESTION",
+          "SUBMIT_SURVEY",
+          "SHOW_HELP",
+          "UNKNOWN"
+        ]
+      },
+      confidence: {
+        type: "number",
+        minimum: 0,
+        maximum: 1
+      },
+      parameters: {
+        type: "object",
+        properties: {
+          question_number: {
+            type: ["integer", "null"],
+            minimum: 1,
+            description: "The question number to navigate to or revise. Set to null for non-navigation intents."
+          }
+        },
+        required: ["question_number"],
+        additionalProperties: false
+      }
+    },
+    required: ["intent", "confidence", "parameters"],
+    additionalProperties: false
+  }
+};
+
 // Service for AI-related operations
 class AIService {
   /**
@@ -242,6 +283,70 @@ class AIService {
     
     return costA / costB;
   }
+
+  /**
+   * Classify user intent from their message
+   * @param {string} message - The user's message
+   * @param {Object} context - Current survey context
+   * @returns {Promise<Object>} - Intent classification result
+   */
+  async classifyIntent(message, context) {
+    try {
+      const systemPrompt = `
+        You are an AI intent classifier for a survey application. Your task is to classify the user's message into one of the following intents:
+  
+        1. ANSWER_QUESTION - User is providing an answer to the current question (Consider even if it is incomplete or low-quality)
+        2. NAVIGATE_TO_QUESTION - User wants to go to a specific question (e.g., "go to question 3")
+        3. REVISE_ANSWER - User wants to revise a previous answer (e.g., "revise question 2")
+        4. SKIP_QUESTION - User wants to skip the current question
+        5. SUBMIT_SURVEY - User wants to submit the survey
+        6. SHOW_HELP - User is asking for help or available actions
+        7. UNKNOWN - Intent cannot be determined (Irrelevant text)
+  
+        For NAVIGATE_TO_QUESTION and REVISE_ANSWER intents, you MUST:
+        - Extract the question number from the message
+        - Include it in the parameters.question_number field
+        - Set it to null for all other intents
+  
+        Examples:
+        - "go to question 3" -> NAVIGATE_TO_QUESTION with parameters.question_number = 3
+        - "revise question 2" -> REVISE_ANSWER with parameters.question_number = 2
+        - "skip" -> SKIP_QUESTION with parameters.question_number = null
+  
+        Current context:
+        - Current question index: ${context.currentQuestionIndex}
+        - Total questions: ${context.totalQuestions}
+        - Survey completed: ${context.isCompleted}
+  
+        User message: ${message}
+      `;
+  
+      const response = await openai.chat.completions.create({
+        model: 'gpt-4o-2024-08-06',
+        messages: [
+          { role: 'system', content: systemPrompt },
+          { role: 'user', content: message }
+        ],
+        response_format: {
+          type: "json_schema",
+          json_schema: intentSchema
+        },
+        temperature: 0.3,
+        max_tokens: 150
+      });
+  
+      const result = JSON.parse(response.choices[0].message.content.trim());
+      return result;
+    } catch (error) {
+      console.error('Error classifying intent:', error);
+      return {
+        intent: 'UNKNOWN',
+        confidence: 0,
+        parameters: {
+          question_number: null
+        }
+      };
+    }}
 }
 
 module.exports = new AIService();

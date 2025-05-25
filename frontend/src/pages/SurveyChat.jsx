@@ -50,6 +50,9 @@ const SurveyChat = () => {
   const [waitingRevisionConfirmation, setWaitingRevisionConfirmation] = useState(null);
   const [revisionTarget, setRevisionTarget] = useState(null);
 
+  // Add new state for help panel
+  const [showHelp, setShowHelp] = useState(false);
+
   // REFS
   const messagesEndRef = useRef(null);
   const typedRef = useRef(null);
@@ -188,23 +191,39 @@ const SurveyChat = () => {
       // update sidebar
       updateQuestionStates(res.data.sessionData, res.data.answers);
 
+      // Check if all questions are handled
+      const allQuestionsHandled = 
+        res.data.sessionData.completedQuestions.length + 
+        res.data.sessionData.skippedQuestions.length === 
+        survey.Questions.length;
+
       // update session and chat
-      // New: we’ve finished everything — ask to revise or submit
-      setMessages(prev => [
-        ...prev,
-        {
-          role: 'bot',
-          content:
-            '🎉 You’ve now gone through all questions! Would you like to revise any answer (e.g. “revise question 3”) or submit the survey now? ',
-          skipTyped: true
-        }
-      ]);
-      // stop advancing pointer — let user choose next action
       setResponseSession(prev => ({
         ...prev,
-        currentQuestion: null,
+        currentQuestion: allQuestionsHandled ? null : res.data.nextQuestion,
         progress: res.data.progress
       }));
+
+      if (allQuestionsHandled) {
+        setMessages(prev => [
+          ...prev,
+          {
+            role: 'bot',
+            content: "You've now gone through all questions! Would you like to revise any answer (e.g. \"revise question 3\") or submit the survey now?",
+            skipTyped: true
+          }
+        ]);
+      } else if (res.data.nextQuestion) {
+        setMessages(prev => [
+          ...prev,
+          {
+            role: 'bot',
+            content: res.data.nextQuestion.text,
+            isQuestion: true,
+            skipTyped: true
+          }
+        ]);
+      }
     } catch (err) {
       console.error(err);
       setError('Failed to submit answer. Please try again.');
@@ -225,21 +244,39 @@ const SurveyChat = () => {
         { participantId: responseSession.participantId, action: 'skip' }
       );
       updateQuestionStates(res.data.sessionData, res.data.answers);
+
+      // Check if all questions are handled
+      const allQuestionsHandled = 
+        res.data.sessionData.completedQuestions.length + 
+        res.data.sessionData.skippedQuestions.length === 
+        survey.Questions.length;
+
       setResponseSession(prev => ({
         ...prev,
-        currentQuestion: res.data.nextQuestion,
+        currentQuestion: allQuestionsHandled ? null : res.data.nextQuestion,
         progress: res.data.progress
       }));
-      setMessages(prev => [
-        ...prev,
-        // { role: 'bot', content: 'Skipping this question— we can return later.', skipTyped: true },
-        {
-          role: 'bot',
-          content: res.data.nextQuestion.text,
-          isQuestion: true,
-          skipTyped: true
-        }
-      ]);
+
+      if (allQuestionsHandled) {
+        setMessages(prev => [
+          ...prev,
+          {
+            role: 'bot',
+            content: "You've now gone through all questions! Would you like to revise any answer (e.g. \"revise question 3\") or submit the survey now?",
+            skipTyped: true
+          }
+        ]);
+      } else if (res.data.nextQuestion) {
+        setMessages(prev => [
+          ...prev,
+          {
+            role: 'bot',
+            content: res.data.nextQuestion.text,
+            isQuestion: true,
+            skipTyped: true
+          }
+        ]);
+      }
     } catch (err) {
       console.error(err);
       setError('Unable to skip. Please try again.');
@@ -270,13 +307,14 @@ const SurveyChat = () => {
         currentQuestion: res.data.nextQuestion,
         progress: res.data.progress
       }));
+      
       // show previous answer if any, then new prompt
       const prev = res.data.previousAnswer || '';
       const msgs = [];
       if (prev) {
         msgs.push({
           role: 'bot',
-          content: `Your previous answer: ${prev}`,
+          content: `Your previous answer: "${prev}"\n\nPlease provide a new answer to update it.`,
           skipTyped: true
         });
       }
@@ -327,7 +365,77 @@ const SurveyChat = () => {
   };
 
   /* -------------------------------------------------- */
-  /* Main natural-language handler                      */
+  /* Add help panel component                           */
+  /* -------------------------------------------------- */
+  const HelpPanel = () => (
+    <Paper
+      elevation={3}
+      sx={{
+        position: 'fixed',
+        right: 20,
+        bottom: 100,
+        width: 300,
+        p: 2,
+        borderRadius: 2,
+        bgcolor: 'background.paper',
+        zIndex: 1000,
+        boxShadow: '0 4px 20px rgba(0,0,0,0.1)'
+      }}
+    >
+      <Typography variant="h6" gutterBottom sx={{ fontWeight: 600 }}>
+        Available Actions
+      </Typography>
+      <List dense>
+        <ListItem>
+          <ListItemText 
+            primary="Answer Question" 
+            secondary="Simply type your answer to the current question"
+          />
+        </ListItem>
+        <ListItem>
+          <ListItemText 
+            primary="Navigate to Question" 
+            secondary="Type 'go to question X' or 'question X'"
+          />
+        </ListItem>
+        <ListItem>
+          <ListItemText 
+            primary="Revise Answer" 
+            secondary="Type 'revise question X' or 'edit question X'"
+          />
+        </ListItem>
+        <ListItem>
+          <ListItemText 
+            primary="Skip Question" 
+            secondary="Type 'skip' or 'next question'"
+          />
+        </ListItem>
+        <ListItem>
+          <ListItemText 
+            primary="Submit Survey" 
+            secondary="Type 'submit' or 'finish survey'"
+          />
+        </ListItem>
+        <ListItem>
+          <ListItemText 
+            primary="Show Help" 
+            secondary="Type 'help' or 'show commands'"
+          />
+        </ListItem>
+      </List>
+      <Button
+        fullWidth
+        variant="outlined"
+        onClick={() => setShowHelp(false)}
+        sx={{ mt: 1 }}
+      >
+        Close
+      </Button>
+    </Paper>
+  );
+
+  /* -------------------------------------------------- */
+  /* Update handleUserMessage function                   */
   /* -------------------------------------------------- */
   const handleUserMessage = async () => {
     const text = userInput.trim();
@@ -337,84 +445,121 @@ const SurveyChat = () => {
     setMessages(prev => [...prev, { role: 'user', content: text }]);
     setUserInput('');
 
-    // 1) handle revision yes/no
-    if (waitingRevisionConfirmation !== null) {
-      const qNum = waitingRevisionConfirmation + 1;
-      if (/^(yes|y)$/i.test(text)) {
-        setRevisionTarget(waitingRevisionConfirmation);
-        setWaitingRevisionConfirmation(null);
-        setMessages(prev => [
-          ...prev,
-          {
-            role: 'bot',
-            content: `Sure—please enter your new answer for Question ${qNum}.`,
-            skipTyped: true
+    try {
+      // Get current context
+      const context = {
+        currentQuestionIndex: responseSession?.progress.current - 1 || 0,
+        totalQuestions: survey?.Questions.length || 0,
+        isCompleted: completed
+      };
+
+      // Classify intent
+      const { intent, confidence, parameters } = await axios.post(
+        `${API_URL}/api/survey/intent`,
+        { message: text, context }
+      ).then(res => res.data);
+
+      console.log('Intent classification:', { intent, confidence, parameters });
+
+      // Handle intent based on classification
+      switch (intent) {
+        case 'ANSWER_QUESTION':
+          if (revisionTarget !== null) {
+            await handleSubmitAnswer(text, revisionTarget);
+            setRevisionTarget(null);
+          } else {
+            await handleSubmitAnswer(text);
           }
-        ]);
-      } else if (/^(no|n)$/i.test(text)) {
-        setWaitingRevisionConfirmation(null);
-        setMessages(prev => [
-          ...prev,
-          { role: 'bot', content: `Okay. What would you like to do next?`, skipTyped: true }
-        ]);
-      } else {
-        setMessages(prev => [
-          ...prev,
-          {
-            role: 'bot',
-            content: `Please answer "yes" or "no". Do you want to update your answer to Question ${qNum}?`,
-            skipTyped: true
+          break;
+
+        case 'NAVIGATE_TO_QUESTION':
+          const qNum = parameters.question_number;
+          if (!survey || qNum < 1 || qNum > survey.Questions.length) {
+            setMessages(prev => [
+              ...prev,
+              {
+                role: 'bot',
+                content: `Invalid question number. Choose between 1 and ${survey?.Questions.length}.`,
+                skipTyped: true
+              }
+            ]);
+          } else {
+            setMessages(prev => [
+              ...prev,
+              { role: 'bot', content: `Navigating to Question ${qNum}...`, skipTyped: true }
+            ]);
+            await handleNavigateQuestion(qNum - 1);
           }
-        ]);
+          break;
+
+        case 'REVISE_ANSWER':
+          const revQNum = parameters.question_number;
+          if (!survey || revQNum < 1 || revQNum > survey.Questions.length) {
+            setMessages(prev => [
+              ...prev,
+              {
+                role: 'bot',
+                content: `Invalid question number. Choose between 1 and ${survey?.Questions.length}.`,
+                skipTyped: true
+              }
+            ]);
+          } else {
+            setMessages(prev => [
+              ...prev,
+              { role: 'bot', content: `Navigating to Question ${revQNum}...`, skipTyped: true }
+            ]);
+            await handleNavigateQuestion(revQNum - 1);
+          }
+          break;
+
+        case 'SKIP_QUESTION':
+          setMessages(prev => [...prev, { role: 'bot', content: `Skipping this question...`, skipTyped: true }]);
+          await handleSkipQuestion();
+          break;
+
+        case 'SUBMIT_SURVEY':
+          await handleFinalSubmit();
+          break;
+
+        case 'SHOW_HELP':
+          setShowHelp(true);
+          setMessages(prev => [
+            ...prev,
+            {
+              role: 'bot',
+              content: 'Here are the available actions you can take. You can also type "help" anytime to see this list.',
+              skipTyped: true
+            }
+          ]);
+          break;
+
+        case 'UNKNOWN':
+        default:
+          setMessages(prev => [
+            ...prev,
+            {
+              role: 'bot',
+              content: "I'm not sure what you want to do. Type 'help' to see available actions.",
+              skipTyped: true
+            }
+          ]);
+          // Show the current question again
+          if (responseSession?.currentQuestion) {
+            setMessages(prev => [
+              ...prev,
+              {
+                role: 'bot',
+                content: responseSession.currentQuestion.text,
+                isQuestion: true,
+                skipTyped: true
+              }
+            ]);
+          }
+          break;
       }
-      return;
-    }
-
-    // 2) navigation / revision request
-    let m;
-    if ((m = text.match(/^go to question (\d+)/i)) || (m = text.match(/^revise question (\d+)/i))) {
-      const qNum = parseInt(m[1], 10);
-      if (!survey || qNum < 1 || qNum > survey.Questions.length) {
-        setMessages(prev => [
-          ...prev,
-          {
-            role: 'bot',
-            content: `Invalid question number. Choose between 1 and ${survey?.Questions.length}.`,
-            skipTyped: true
-          }
-        ]);
-      } else {
-        setMessages(prev => [
-          ...prev,
-          { role: 'bot', content: `Navigating to Question ${qNum}...`, skipTyped: true }
-        ]);
-        await handleNavigateQuestion(qNum - 1);
-        setWaitingRevisionConfirmation(qNum - 1);
-        setMessages(prev => [
-          ...prev,
-          {
-            role: 'bot',
-            content: `Would you like to update your previous answer to Question ${qNum}? (yes/no)`,
-            skipTyped: true
-          }
-        ]);
-      }
-      return;
-    }
-
-    // 3) skip / next
-    if (/^skip(question)?$/i.test(text) || /^next question$/i.test(text)) {
-      setMessages(prev => [...prev, { role: 'bot', content: `Skipping this question...`, skipTyped: true }]);
-      await handleSkipQuestion();
-      return;
-    }
-
-    // 4) it's an answer
-    if (revisionTarget !== null) {
-      await handleSubmitAnswer(text, revisionTarget);
-      setRevisionTarget(null);
-    } else {
-      await handleSubmitAnswer(text);
+    } catch (error) {
+      console.error('Error processing message:', error);
+      setError('Failed to process your message. Please try again.');
     }
   };
 
@@ -593,7 +738,7 @@ const SurveyChat = () => {
             <Box sx={{ maxWidth: 800, mx: 'auto', display: 'flex', gap: 1 }}>
               <TextField
                 fullWidth
-                placeholder="Type here…"
+                placeholder="Type here… (type 'help' to see available actions)"
                 multiline
                 maxRows={4}
                 value={userInput}
@@ -616,10 +761,20 @@ const SurveyChat = () => {
               >
                 {submitting ? <CircularProgress size={22} /> : <SendIcon />}
               </Button>
+              <Button
+                variant="outlined"
+                onClick={() => setShowHelp(true)}
+                sx={{ minWidth: 100 }}
+              >
+                Help
+              </Button>
             </Box>
           </Box>
         )}
       </Box>
+
+      {/* Help Panel */}
+      {showHelp && <HelpPanel />}
     </Box>
   );
 };
