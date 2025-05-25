@@ -18,7 +18,19 @@ module.exports = (sequelize) => {
     models: {
       type: DataTypes.JSONB,
       allowNull: false,
-      defaultValue: []
+      defaultValue: [],
+      validate: {
+        isValidModels(value) {
+          if (!Array.isArray(value)) {
+            throw new Error('Models must be an array');
+          }
+          value.forEach(model => {
+            if (!model.name || typeof model.costPerToken !== 'number') {
+              throw new Error('Each model must have a name and costPerToken');
+            }
+          });
+        }
+      }
     },
     status: {
       type: DataTypes.STRING,
@@ -31,7 +43,65 @@ module.exports = (sequelize) => {
     results: {
       type: DataTypes.JSONB,
       allowNull: false,
-      defaultValue: []
+      defaultValue: [],
+      validate: {
+        isValidResults(value) {
+          if (!Array.isArray(value)) {
+            throw new Error('Results must be an array');
+          }
+          value.forEach(result => {
+            if (!result.modelName || typeof result.averageQualityScore !== 'number') {
+              throw new Error('Each result must have a modelName and averageQualityScore');
+            }
+          });
+        }
+      }
+    },
+    modelComparisons: {
+      type: DataTypes.JSONB,
+      allowNull: true,
+      defaultValue: [],
+      validate: {
+        isValidComparisons(value) {
+          if (!Array.isArray(value)) {
+            throw new Error('Model comparisons must be an array');
+          }
+          value.forEach(comparison => {
+            if (!comparison.modelA || !comparison.modelB || !comparison.comparison) {
+              throw new Error('Each comparison must have modelA, modelB, and comparison data');
+            }
+          });
+        }
+      }
+    },
+    testCases: {
+      type: DataTypes.JSONB,
+      allowNull: true,
+      defaultValue: [],
+      validate: {
+        isValidTestCases(value) {
+          if (!Array.isArray(value)) {
+            throw new Error('Test cases must be an array');
+          }
+          value.forEach(testCase => {
+            if (!testCase.question || !Array.isArray(testCase.expectedKeywords)) {
+              throw new Error('Each test case must have a question and expectedKeywords array');
+            }
+          });
+        }
+      }
+    },
+    metrics: {
+      type: DataTypes.JSONB,
+      allowNull: true,
+      defaultValue: {},
+      validate: {
+        isValidMetrics(value) {
+          if (typeof value !== 'object') {
+            throw new Error('Metrics must be an object');
+          }
+        }
+      }
     },
     createdBy: {
       type: DataTypes.UUID,

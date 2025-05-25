@@ -1,9 +1,13 @@
 import React, { useState, useEffect } from 'react';
-import { Box, Typography, Grid, Card, CardContent, Paper, CircularProgress, Button, Tabs, Tab, Divider, Chip, Avatar, TextField, FormControl, InputLabel, Select, MenuItem } from '@mui/material';
+import { Box, Typography, Grid, Card, CardContent, Paper, CircularProgress, Button, Tabs, Tab, Divider, Chip, Avatar, TextField, FormControl, InputLabel, Select, MenuItem, IconButton, Dialog, DialogTitle, DialogContent, DialogActions, Table, TableBody, TableCell, TableContainer, TableHead, TableRow, Alert } from '@mui/material';
 import { motion } from 'framer-motion';
 import axios from 'axios';
 import { Chart as ChartJS, CategoryScale, LinearScale, BarElement, Title, Tooltip, Legend, ArcElement, PointElement, LineElement } from 'chart.js';
 import { Bar, Pie, Line } from 'react-chartjs-2';
+import { useNavigate } from 'react-router-dom';
+import DeleteIcon from '@mui/icons-material/Delete';
+import VisibilityIcon from '@mui/icons-material/Visibility';
+import CloseIcon from '@mui/icons-material/Close';
 
 // Icons
 import AssessmentIcon from '@mui/icons-material/Assessment';
@@ -27,35 +31,78 @@ const Evaluation = () => {
     name: '',
     description: '',
     models: [
-      { name: 'GPT-4.1', costPerToken: 0.00006 },
-      { name: 'GPT-4.1-mini', costPerToken: 0.00003 }
+      { name: 'gpt-4.1', costPerToken: 0.00006 },
+      { name: 'gpt-4.1-mini', costPerToken: 0.00003 }
     ]
   });
   const [runningEvaluation, setRunningEvaluation] = useState(false);
+  const [openDialog, setOpenDialog] = useState(false);
+  const navigate = useNavigate();
   
   const availableModels = [
-    { name: 'GPT-4.1', costPerToken: 0.00006, description: 'Full GPT-4 model with maximum capabilities' },
-    { name: 'GPT-4.1-mini', costPerToken: 0.00003, description: 'Optimized for faster responses with slightly reduced quality' },
-    { name: 'GPT-4.1-nano', costPerToken: 0.000015, description: 'Lightweight version for cost-sensitive applications' }
+    { name: 'gpt-4.1', costPerToken: 0.00006, description: 'Full GPT-4 model with maximum capabilities' },
+    { name: 'gpt-4.1-mini', costPerToken: 0.00003, description: 'Optimized for faster responses with slightly reduced quality' },
+    { name: 'gpt-4.1-nano', costPerToken: 0.000015, description: 'Lightweight version for cost-sensitive applications' }
   ];
 
   useEffect(() => {
+    console.log('Component mounted');
     fetchEvaluations();
   }, []);
 
   const fetchEvaluations = async () => {
     try {
+      console.log('Fetching evaluations...');
       setLoading(true);
-      const res = await axios.get(`${import.meta.env.VITE_API_URL || 'http://localhost:5000'}/api/evaluation`);
-      setEvaluations(res.data);
+      setError(null);
+
+      const token = localStorage.getItem('token');
+      console.log('Token exists:', !!token);
+
+      if (!token) {
+        console.log('No token found');
+        setError('Please log in to view evaluations');
+        setLoading(false);
+        return;
+      }
+
+      const apiUrl = `${import.meta.env.VITE_API_URL || 'http://localhost:5000'}/api/evaluation`;
+      console.log('API URL:', apiUrl);
+
+      const res = await axios.get(apiUrl, {
+        headers: {
+          'x-auth-token': token
+        }
+      });
       
-      if (res.data.length > 0) {
+      console.log('API Response:', res.data);
+      
+      if (!res.data) {
+        console.log('No data in response');
+        setEvaluations([]);
+      } else {
+        console.log('Setting evaluations:', res.data);
+        setEvaluations(Array.isArray(res.data) ? res.data : []);
+      }
+      
+      if (res.data && Array.isArray(res.data) && res.data.length > 0) {
+        console.log('Setting selected evaluation:', res.data[0]);
         setSelectedEvaluation(res.data[0]);
       }
     } catch (err) {
-      console.error('Error fetching evaluations:', err);
-      setError('Failed to load model evaluations');
+      console.error('Error details:', {
+        message: err.message,
+        response: err.response?.data,
+        status: err.response?.status
+      });
+      
+      if (err.response?.status === 401) {
+        setError('Please log in to view evaluations');
+      } else {
+        setError(`Failed to load model evaluations: ${err.message}`);
+      }
     } finally {
+      console.log('Fetch completed, setting loading to false');
       setLoading(false);
     }
   };
@@ -88,12 +135,33 @@ const Evaluation = () => {
   const handleCreateEvaluation = async () => {
     try {
       setRunningEvaluation(true);
+      const token = localStorage.getItem('token');
+      if (!token) {
+        setError('Please log in to create evaluations');
+        return;
+      }
       
       // Create evaluation
-      const res = await axios.post(`${import.meta.env.VITE_API_URL || 'http://localhost:5000'}/api/evaluation`, newEvaluation);
+      const res = await axios.post(
+        `${import.meta.env.VITE_API_URL || 'http://localhost:5000'}/api/evaluation`,
+        newEvaluation,
+        {
+          headers: {
+            'x-auth-token': token
+          }
+        }
+      );
       
       // Run evaluation
-      await axios.post(`${import.meta.env.VITE_API_URL || 'http://localhost:5000'}/api/evaluation/${res.data.id}/run`);
+      await axios.post(
+        `${import.meta.env.VITE_API_URL || 'http://localhost:5000'}/api/evaluation/${res.data.id}/run`,
+        {},
+        {
+          headers: {
+            'x-auth-token': token
+          }
+        }
+      );
       
       // Refresh evaluations
       fetchEvaluations();
@@ -103,8 +171,8 @@ const Evaluation = () => {
         name: '',
         description: '',
         models: [
-          { name: 'GPT-4.1', costPerToken: 0.00006 },
-          { name: 'GPT-4.1-mini', costPerToken: 0.00003 }
+          { name: 'gpt-4', costPerToken: 0.00006 },
+          { name: 'gpt-3.5-turbo', costPerToken: 0.000002 }
         ]
       });
       
@@ -112,85 +180,130 @@ const Evaluation = () => {
       setTabValue(0);
     } catch (err) {
       console.error('Error creating evaluation:', err);
-      setError('Failed to create and run evaluation');
+      if (err.response?.status === 401) {
+        setError('Please log in to create evaluations');
+      } else {
+        setError('Failed to create and run evaluation');
+      }
     } finally {
       setRunningEvaluation(false);
     }
   };
 
-  const prepareChartData = () => {
-    if (!selectedEvaluation || !selectedEvaluation.results) return null;
+  const handleDelete = async (id) => {
+    if (window.confirm('Are you sure you want to delete this evaluation?')) {
+      try {
+        const token = localStorage.getItem('token');
+        if (!token) {
+          setError('Please log in to delete evaluations');
+          return;
+        }
+
+        await axios.delete(
+          `${import.meta.env.VITE_API_URL || 'http://localhost:5000'}/api/evaluation/${id}`,
+          {
+            headers: {
+              'x-auth-token': token
+            }
+          }
+        );
+        fetchEvaluations();
+      } catch (error) {
+        console.error('Error deleting evaluation:', error);
+        if (error.response?.status === 401) {
+          setError('Please log in to delete evaluations');
+        } else {
+          setError('Failed to delete evaluation');
+        }
+      }
+    }
+  };
+
+  const handleRunEvaluation = async (id) => {
+    try {
+      setRunningEvaluation(true);
+      const token = localStorage.getItem('token');
+      if (!token) {
+        setError('Please log in to run evaluations');
+        return;
+      }
+
+      await axios.post(
+        `${import.meta.env.VITE_API_URL || 'http://localhost:5000'}/api/evaluation/${id}/run`,
+        {},
+        {
+          headers: {
+            'x-auth-token': token
+          }
+        }
+      );
+      fetchEvaluations();
+    } catch (error) {
+      console.error('Error running evaluation:', error);
+      if (error.response?.status === 401) {
+        setError('Please log in to run evaluations');
+      } else {
+        setError('Failed to run evaluation');
+      }
+    } finally {
+      setRunningEvaluation(false);
+    }
+  };
+
+  const handleViewDetails = (evaluation) => {
+    setSelectedEvaluation(evaluation);
+    setOpenDialog(true);
+  };
+
+  const prepareChartData = (evaluation) => {
+    if (!evaluation || !evaluation.results) return null;
     
-    const models = selectedEvaluation.results.map(result => result.modelName);
-    const qualityScores = selectedEvaluation.results.map(result => result.averageQualityScore);
-    const responseTimes = selectedEvaluation.results.map(result => result.averageResponseTime);
-    const costs = selectedEvaluation.results.map(result => result.totalCost);
+    const models = evaluation.results.map(result => result.modelName);
+    const qualityScores = evaluation.results.map(result => result.averageQualityScore || 0);
+    const responseTimes = evaluation.results.map(result => result.averageResponseTime || 0);
+    const costs = evaluation.results.map(result => result.totalCost || 0);
     
-    const barData = {
+    return {
       labels: models,
       datasets: [
         {
-          label: 'Average Quality Score (1-5)',
+          label: 'Quality Score',
           data: qualityScores,
-          backgroundColor: 'rgba(98, 68, 187, 0.6)',
-          borderColor: 'rgba(98, 68, 187, 1)',
-          borderWidth: 1,
-        }
-      ],
-    };
-    
-    const responseTimeData = {
-      labels: models,
-      datasets: [
+          borderColor: 'rgb(75, 192, 192)',
+          tension: 0.1
+        },
         {
-          label: 'Average Response Time (ms)',
+          label: 'Response Time (ms)',
           data: responseTimes,
-          backgroundColor: 'rgba(0, 229, 255, 0.6)',
-          borderColor: 'rgba(0, 229, 255, 1)',
-          borderWidth: 1,
-        }
-      ],
-    };
-    
-    const costData = {
-      labels: models,
-      datasets: [
+          borderColor: 'rgb(255, 99, 132)',
+          tension: 0.1
+        },
         {
-          label: 'Total Cost ($)',
+          label: 'Cost ($)',
           data: costs,
-          backgroundColor: 'rgba(255, 61, 113, 0.6)',
-          borderColor: 'rgba(255, 61, 113, 1)',
-          borderWidth: 1,
+          borderColor: 'rgb(54, 162, 235)',
+          tension: 0.1
         }
-      ],
+      ]
     };
-    
-    // Radar data for comparison
-    const radarData = {
-      labels: ['Quality', 'Speed', 'Cost Efficiency'],
-      datasets: selectedEvaluation.results.map((result, index) => {
-        // Normalize values for radar chart
-        const normalizedQuality = result.averageQualityScore / 5; // Quality is on a scale of 1-5
-        
-        // For speed, lower is better, so invert the normalization
-        const maxResponseTime = Math.max(...responseTimes);
-        const normalizedSpeed = 1 - (result.averageResponseTime / maxResponseTime);
-        
-        // For cost, lower is better, so invert the normalization
-        const maxCost = Math.max(...costs);
-        const normalizedCost = maxCost > 0 ? 1 - (result.totalCost / maxCost) : 0;
-        
-        return {
-          label: result.modelName,
-          data: [normalizedQuality, normalizedSpeed, normalizedCost],
-          backgroundColor: index === 0 ? 'rgba(98, 68, 187, 0.2)' : 'rgba(0, 229, 255, 0.2)',
-          borderColor: index === 0 ? 'rgba(98, 68, 187, 1)' : 'rgba(0, 229, 255, 1)',
-          borderWidth: 2,
-        };
-      }),
-    };
-    
-    return { barData, responseTimeData, costData, radarData };
+  };
+
+  const chartOptions = {
+    responsive: true,
+    plugins: {
+      legend: {
+        position: 'top',
+      },
+      title: {
+        display: true,
+        text: 'Model Performance Comparison'
+      }
+    },
+    scales: {
+      y: {
+        beginAtZero: true
+      }
+    }
   };
 
   const containerVariants = {
@@ -213,7 +326,8 @@ const Evaluation = () => {
     }
   };
 
-  if (loading && evaluations.length === 0) {
+  if (loading) {
+    console.log('Rendering loading state');
     return (
       <Box sx={{ display: 'flex', justifyContent: 'center', alignItems: 'center', height: '50vh' }}>
         <CircularProgress />
@@ -221,7 +335,14 @@ const Evaluation = () => {
     );
   }
 
-  const chartData = selectedEvaluation ? prepareChartData() : null;
+  console.log('Rendering main component', {
+    evaluations,
+    selectedEvaluation,
+    error,
+    tabValue
+  });
+
+  const chartData = selectedEvaluation ? prepareChartData(selectedEvaluation) : null;
 
   return (
     <motion.div
@@ -243,6 +364,12 @@ const Evaluation = () => {
         </motion.div>
       </Box>
       
+      {error && (
+        <Alert severity="error" sx={{ mb: 3 }}>
+          {error}
+        </Alert>
+      )}
+      
       <motion.div variants={itemVariants}>
         <Box sx={{ borderBottom: 1, borderColor: 'divider', mb: 3 }}>
           <Tabs value={tabValue} onChange={handleTabChange} aria-label="evaluation tabs">
@@ -255,7 +382,7 @@ const Evaluation = () => {
       {/* Results Tab */}
       {tabValue === 0 && (
         <Box>
-          {evaluations.length === 0 ? (
+          {!evaluations || evaluations.length === 0 ? (
             <motion.div variants={itemVariants}>
               <Paper elevation={0} sx={{ p: 4, textAlign: 'center', borderRadius: 3, bgcolor: 'background.default' }}>
                 <Typography variant="h6" gutterBottom>
@@ -301,49 +428,92 @@ const Evaluation = () => {
                           onClick={() => setSelectedEvaluation(evaluation)}
                         >
                           <CardContent sx={{ p: 2 }}>
-                            <Typography variant="subtitle1" sx={{ fontWeight: 600 }}>
-                              {evaluation.name}
-                            </Typography>
-                            
-                            <Typography variant="caption" color={selectedEvaluation?.id === evaluation.id ? 'inherit' : 'text.secondary'}>
-                              {new Date(evaluation.createdAt).toLocaleDateString()}
-                            </Typography>
-                            
-                            <Box sx={{ display: 'flex', alignItems: 'center', mt: 1 }}>
-                              <Chip 
-                                label={`${evaluation.results?.length || 0} models`} 
-                                size="small"
-                                sx={{ 
-                                  mr: 1,
-                                  bgcolor: selectedEvaluation?.id === evaluation.id 
-                                    ? 'rgba(255,255,255,0.3)'
-                                    : undefined
-                                }}
-                              />
+                            <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
+                              <Box>
+                                <Typography variant="subtitle1" sx={{ fontWeight: 600 }}>
+                                  {evaluation.name || 'Unnamed Evaluation'}
+                                </Typography>
+                                
+                                <Typography variant="caption" color={selectedEvaluation?.id === evaluation.id ? 'inherit' : 'text.secondary'}>
+                                  {evaluation.createdAt ? new Date(evaluation.createdAt).toLocaleDateString() : 'No date'}
+                                </Typography>
+                                
+                                <Box sx={{ display: 'flex', alignItems: 'center', mt: 1 }}>
+                                  <Chip 
+                                    label={`${evaluation.models?.length || 0} models`} 
+                                    size="small"
+                                    sx={{ 
+                                      mr: 1,
+                                      bgcolor: selectedEvaluation?.id === evaluation.id 
+                                        ? 'rgba(255,255,255,0.3)'
+                                        : undefined
+                                    }}
+                                  />
+                                  
+                                  {evaluation.status === 'completed' ? (
+                                    <Chip 
+                                      label="Completed" 
+                                      size="small"
+                                      color="success"
+                                      sx={{ 
+                                        bgcolor: selectedEvaluation?.id === evaluation.id 
+                                          ? 'rgba(255,255,255,0.3)'
+                                          : undefined
+                                      }}
+                                    />
+                                  ) : evaluation.status === 'running' ? (
+                                    <Chip 
+                                      label="Running" 
+                                      size="small"
+                                      color="warning"
+                                      sx={{ 
+                                        bgcolor: selectedEvaluation?.id === evaluation.id 
+                                          ? 'rgba(255,255,255,0.3)'
+                                          : undefined
+                                      }}
+                                    />
+                                  ) : (
+                                    <Chip 
+                                      label="Failed" 
+                                      size="small"
+                                      color="error"
+                                      sx={{ 
+                                        bgcolor: selectedEvaluation?.id === evaluation.id 
+                                          ? 'rgba(255,255,255,0.3)'
+                                          : undefined
+                                      }}
+                                    />
+                                  )}
+                                </Box>
+                              </Box>
                               
-                              {evaluation.status === 'completed' ? (
-                                <Chip 
-                                  label="Completed" 
+                              <Box sx={{ display: 'flex', gap: 1 }}>
+                                <IconButton
                                   size="small"
-                                  color="success"
-                                  sx={{ 
-                                    bgcolor: selectedEvaluation?.id === evaluation.id 
-                                      ? 'rgba(255,255,255,0.3)'
-                                      : undefined
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    handleViewDetails(evaluation);
                                   }}
-                                />
-                              ) : (
-                                <Chip 
-                                  label="Running" 
+                                  sx={{ 
+                                    color: selectedEvaluation?.id === evaluation.id ? 'white' : 'inherit'
+                                  }}
+                                >
+                                  <VisibilityIcon fontSize="small" />
+                                </IconButton>
+                                
+                                <IconButton
                                   size="small"
-                                  color="warning"
-                                  sx={{ 
-                                    bgcolor: selectedEvaluation?.id === evaluation.id 
-                                      ? 'rgba(255,255,255,0.3)'
-                                      : undefined
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    handleDelete(evaluation.id);
                                   }}
-                                />
-                              )}
+                                  sx={{ 
+                                    color: selectedEvaluation?.id === evaluation.id ? 'white' : 'inherit'
+                                  }}
+                                >
+                                  <DeleteIcon fontSize="small" />
+                                </IconButton>
+                              </Box>
                             </Box>
                           </CardContent>
                         </Card>
@@ -363,11 +533,11 @@ const Evaluation = () => {
               </Grid>
               
               <Grid item xs={12} md={9}>
-                {selectedEvaluation && selectedEvaluation.status === 'completed' && chartData ? (
+                {selectedEvaluation ? (
                   <motion.div variants={itemVariants}>
-                    <Paper elevation={2} sx={{ p: 3, borderRadius: 3, mb: 3 }}>
+                    <Paper elevation={2} sx={{ p: 3, borderRadius: 3 }}>
                       <Typography variant="h6" gutterBottom sx={{ fontWeight: 600 }}>
-                        {selectedEvaluation.name}
+                        {selectedEvaluation.name || 'Unnamed Evaluation'}
                       </Typography>
                       
                       {selectedEvaluation.description && (
@@ -378,265 +548,64 @@ const Evaluation = () => {
                       
                       <Divider sx={{ my: 2 }} />
                       
-                      <Grid container spacing={3}>
-                        <Grid item xs={12} md={4}>
-                          <Card elevation={1} sx={{ borderRadius: 2 }}>
-                            <CardContent>
-                              <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                                <Typography variant="subtitle2" color="text.secondary">
-                                  Best Quality
-                                </Typography>
-                                <Box 
-                                  sx={{ 
-                                    bgcolor: 'primary.light', 
-                                    opacity: 0.1,
-                                    borderRadius: '50%', 
-                                    width: 40, 
-                                    height: 40, 
-                                    display: 'flex', 
-                                    alignItems: 'center', 
-                                    justifyContent: 'center',
-                                    color: 'primary.main'
-                                  }}
-                                >
-                                  <StarIcon />
-                                </Box>
-                              </Box>
-                              
-                              <Typography variant="h6" sx={{ fontWeight: 600, mt: 1 }}>
-                                {selectedEvaluation.results.reduce((best, current) => 
-                                  current.averageQualityScore > best.averageQualityScore ? current : best
-                                ).modelName}
-                              </Typography>
-                              
-                              <Typography variant="body2" color="text.secondary">
-                                Score: {selectedEvaluation.results.reduce((best, current) => 
-                                  current.averageQualityScore > best.averageQualityScore ? current : best
-                                ).averageQualityScore.toFixed(2)}/5
-                              </Typography>
-                            </CardContent>
-                          </Card>
-                        </Grid>
-                        
-                        <Grid item xs={12} md={4}>
-                          <Card elevation={1} sx={{ borderRadius: 2 }}>
-                            <CardContent>
-                              <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                                <Typography variant="subtitle2" color="text.secondary">
-                                  Fastest Response
-                                </Typography>
-                                <Box 
-                                  sx={{ 
-                                    bgcolor: 'info.light', 
-                                    opacity: 0.1,
-                                    borderRadius: '50%', 
-                                    width: 40, 
-                                    height: 40, 
-                                    display: 'flex', 
-                                    alignItems: 'center', 
-                                    justifyContent: 'center',
-                                    color: 'info.main'
-                                  }}
-                                >
-                                  <SpeedIcon />
-                                </Box>
-                              </Box>
-                              
-                              <Typography variant="h6" sx={{ fontWeight: 600, mt: 1 }}>
-                                {selectedEvaluation.results.reduce((fastest, current) => 
-                                  current.averageResponseTime < fastest.averageResponseTime ? current : fastest
-                                ).modelName}
-                              </Typography>
-                              
-                              <Typography variant="body2" color="text.secondary">
-                                Time: {(selectedEvaluation.results.reduce((fastest, current) => 
-                                  current.averageResponseTime < fastest.averageResponseTime ? current : fastest
-                                ).averageResponseTime / 1000).toFixed(2)}s
-                              </Typography>
-                            </CardContent>
-                          </Card>
-                        </Grid>
-                        
-                        <Grid item xs={12} md={4}>
-                          <Card elevation={1} sx={{ borderRadius: 2 }}>
-                            <CardContent>
-                              <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                                <Typography variant="subtitle2" color="text.secondary">
-                                  Most Cost-Effective
-                                </Typography>
-                                <Box 
-                                  sx={{ 
-                                    bgcolor: 'success.light', 
-                                    opacity: 0.1,
-                                    borderRadius: '50%', 
-                                    width: 40, 
-                                    height: 40, 
-                                    display: 'flex', 
-                                    alignItems: 'center', 
-                                    justifyContent: 'center',
-                                    color: 'success.main'
-                                  }}
-                                >
-                                  <AttachMoneyIcon />
-                                </Box>
-                              </Box>
-                              
-                              <Typography variant="h6" sx={{ fontWeight: 600, mt: 1 }}>
-                                {selectedEvaluation.results.reduce((cheapest, current) => 
-                                  current.totalCost < cheapest.totalCost ? current : cheapest
-                                ).modelName}
-                              </Typography>
-                              
-                              <Typography variant="body2" color="text.secondary">
-                                Cost: ${selectedEvaluation.results.reduce((cheapest, current) => 
-                                  current.totalCost < cheapest.totalCost ? current : cheapest
-                                ).totalCost.toFixed(4)}
-                              </Typography>
-                            </CardContent>
-                          </Card>
-                        </Grid>
-                      </Grid>
-                    </Paper>
-                    
-                    <Grid container spacing={3}>
-                      <Grid item xs={12} md={6}>
-                        <Paper elevation={2} sx={{ p: 3, borderRadius: 3 }}>
-                          <Typography variant="h6" gutterBottom sx={{ fontWeight: 600 }}>
-                            Quality Comparison
-                          </Typography>
-                          <Box sx={{ height: 300 }}>
-                            <Bar 
-                              data={chartData.barData}
-                              options={{
-                                responsive: true,
-                                maintainAspectRatio: false,
-                                scales: {
-                                  y: {
-                                    beginAtZero: true,
-                                    max: 5,
-                                    ticks: {
-                                      stepSize: 1
-                                    }
-                                  }
-                                }
-                              }}
-                            />
-                          </Box>
-                        </Paper>
-                      </Grid>
-                      
-                      <Grid item xs={12} md={6}>
-                        <Paper elevation={2} sx={{ p: 3, borderRadius: 3 }}>
-                          <Typography variant="h6" gutterBottom sx={{ fontWeight: 600 }}>
-                            Response Time Comparison
-                          </Typography>
-                          <Box sx={{ height: 300 }}>
-                            <Bar 
-                              data={chartData.responseTimeData}
-                              options={{
-                                responsive: true,
-                                maintainAspectRatio: false,
-                                scales: {
-                                  y: {
-                                    beginAtZero: true,
-                                    ticks: {
-                                      callback: function(value) {
-                                        return (value / 1000).toFixed(1) + 's';
-                                      }
-                                    }
-                                  }
-                                }
-                              }}
-                            />
-                          </Box>
-                        </Paper>
-                      </Grid>
-                      
-                      <Grid item xs={12} md={6}>
-                        <Paper elevation={2} sx={{ p: 3, borderRadius: 3 }}>
-                          <Typography variant="h6" gutterBottom sx={{ fontWeight: 600 }}>
-                            Cost Comparison
-                          </Typography>
-                          <Box sx={{ height: 300 }}>
-                            <Bar 
-                              data={chartData.costData}
-                              options={{
-                                responsive: true,
-                                maintainAspectRatio: false,
-                                scales: {
-                                  y: {
-                                    beginAtZero: true,
-                                    ticks: {
-                                      callback: function(value) {
-                                        return '$' + value.toFixed(4);
-                                      }
-                                    }
-                                  }
-                                }
-                              }}
-                            />
-                          </Box>
-                        </Paper>
-                      </Grid>
-                      
-                      <Grid item xs={12} md={6}>
-                        <Paper elevation={2} sx={{ p: 3, borderRadius: 3 }}>
-                          <Typography variant="h6" gutterBottom sx={{ fontWeight: 600 }}>
-                            Model Comparison Summary
-                          </Typography>
-                          <Box sx={{ p: 2 }}>
-                            <Typography variant="body2" paragraph>
-                              Based on this evaluation, here's a summary of each model's performance:
+                      {selectedEvaluation.status === 'completed' ? (
+                        selectedEvaluation.results && selectedEvaluation.results.length > 0 ? (
+                          <Box>
+                            <Typography variant="body1" gutterBottom>
+                              Evaluation Results
                             </Typography>
-                            
-                            {selectedEvaluation.results.map((result, index) => (
-                              <Box key={index} sx={{ mb: 2 }}>
-                                <Typography variant="subtitle1" sx={{ fontWeight: 600 }}>
-                                  {result.modelName}
-                                </Typography>
-                                <Typography variant="body2">
-                                  • Quality Score: {result.averageQualityScore.toFixed(2)}/5
-                                </Typography>
-                                <Typography variant="body2">
-                                  • Response Time: {(result.averageResponseTime / 1000).toFixed(2)}s
-                                </Typography>
-                                <Typography variant="body2">
-                                  • Total Cost: ${result.totalCost.toFixed(4)}
-                                </Typography>
-                              </Box>
-                            ))}
-                            
-                            <Typography variant="body2" sx={{ mt: 3, fontWeight: 500 }}>
-                              Recommendation:
-                            </Typography>
-                            <Typography variant="body2">
-                              {selectedEvaluation.results[0].averageQualityScore > selectedEvaluation.results[1].averageQualityScore * 1.2 
-                                ? `${selectedEvaluation.results[0].modelName} provides significantly better quality responses and is recommended for critical surveys where response quality is paramount.`
-                                : `${selectedEvaluation.results[1].modelName} offers a good balance of quality and cost, making it suitable for most survey applications.`
-                              }
+                            <Typography variant="body2" color="text.secondary">
+                              This evaluation was run with {selectedEvaluation.results.length} models.
                             </Typography>
                           </Box>
-                        </Paper>
-                      </Grid>
-                    </Grid>
-                  </motion.div>
-                ) : selectedEvaluation && selectedEvaluation.status === 'running' ? (
-                  <motion.div variants={itemVariants}>
-                    <Paper elevation={2} sx={{ p: 4, borderRadius: 3, textAlign: 'center' }}>
-                      <CircularProgress size={60} sx={{ mb: 3 }} />
-                      <Typography variant="h6" gutterBottom>
-                        Evaluation in Progress
-                      </Typography>
-                      <Typography variant="body2" color="text.secondary" paragraph>
-                        The model evaluation is currently running. This may take a few minutes to complete.
-                      </Typography>
-                      <Button 
-                        variant="contained" 
-                        onClick={fetchEvaluations}
-                        sx={{ mt: 2 }}
-                      >
-                        Refresh Status
-                      </Button>
+                        ) : (
+                          <Box sx={{ textAlign: 'center', py: 4 }}>
+                            <Typography variant="body1" color="text.secondary">
+                              This evaluation was run before the latest updates. Run a new evaluation to see detailed metrics.
+                            </Typography>
+                            <Button 
+                              variant="contained" 
+                              onClick={() => setTabValue(1)}
+                              sx={{ mt: 2 }}
+                            >
+                              Run New Evaluation
+                            </Button>
+                          </Box>
+                        )
+                      ) : selectedEvaluation.status === 'running' ? (
+                        <Box sx={{ textAlign: 'center', py: 4 }}>
+                          <CircularProgress size={60} sx={{ mb: 3 }} />
+                          <Typography variant="h6" gutterBottom>
+                            Evaluation in Progress
+                          </Typography>
+                          <Typography variant="body2" color="text.secondary" paragraph>
+                            The model evaluation is currently running. This may take a few minutes to complete.
+                          </Typography>
+                          <Button 
+                            variant="contained" 
+                            onClick={fetchEvaluations}
+                            sx={{ mt: 2 }}
+                          >
+                            Refresh Status
+                          </Button>
+                        </Box>
+                      ) : (
+                        <Box sx={{ textAlign: 'center', py: 4 }}>
+                          <Typography variant="h6" color="error" gutterBottom>
+                            Evaluation Failed
+                          </Typography>
+                          <Typography variant="body2" color="text.secondary" paragraph>
+                            The evaluation encountered an error. Please try running it again.
+                          </Typography>
+                          <Button 
+                            variant="contained" 
+                            onClick={() => handleRunEvaluation(selectedEvaluation.id)}
+                            sx={{ mt: 2 }}
+                          >
+                            Retry Evaluation
+                          </Button>
+                        </Box>
+                      )}
                     </Paper>
                   </motion.div>
                 ) : (
@@ -758,6 +727,150 @@ const Evaluation = () => {
           </Paper>
         </motion.div>
       )}
+
+      <Dialog
+        open={openDialog}
+        onClose={() => setOpenDialog(false)}
+        maxWidth="md"
+        fullWidth
+      >
+        <DialogTitle>
+          {selectedEvaluation?.name || 'Evaluation Details'}
+          <IconButton
+            aria-label="close"
+            onClick={() => setOpenDialog(false)}
+            sx={{ position: 'absolute', right: 8, top: 8 }}
+          >
+            <CloseIcon />
+          </IconButton>
+        </DialogTitle>
+        <DialogContent>
+          {selectedEvaluation && (
+            <Box sx={{ mt: 2 }}>
+              {selectedEvaluation.status === 'completed' && (
+                <>
+                  <Box mb={3}>
+                    <Typography variant="h6" gutterBottom>Performance Chart</Typography>
+                    <Line data={prepareChartData(selectedEvaluation)} options={chartOptions} />
+                  </Box>
+
+                  <Typography variant="h6" gutterBottom>Test Cases</Typography>
+                  <TableContainer component={Paper}>
+                    <Table>
+                      <TableHead>
+                        <TableRow>
+                          <TableCell>Question</TableCell>
+                          <TableCell>Expected Keywords</TableCell>
+                          <TableCell>Complexity</TableCell>
+                        </TableRow>
+                      </TableHead>
+                      <TableBody>
+                        {selectedEvaluation.testCases?.map((testCase, index) => (
+                          <TableRow key={index}>
+                            <TableCell>{testCase.question}</TableCell>
+                            <TableCell>
+                              {testCase.expectedKeywords.map((keyword, i) => (
+                                <Chip key={i} label={keyword} size="small" sx={{ mr: 0.5, mb: 0.5 }} />
+                              ))}
+                            </TableCell>
+                            <TableCell>{testCase.complexity}</TableCell>
+                          </TableRow>
+                        ))}
+                      </TableBody>
+                    </Table>
+                  </TableContainer>
+
+                  <Typography variant="h6" gutterBottom sx={{ mt: 3 }}>Model Results</Typography>
+                  <TableContainer component={Paper}>
+                    <Table>
+                      <TableHead>
+                        <TableRow>
+                          <TableCell>Model</TableCell>
+                          <TableCell>Quality Score</TableCell>
+                          <TableCell>Completeness</TableCell>
+                          <TableCell>Token Usage</TableCell>
+                          <TableCell>Cost</TableCell>
+                        </TableRow>
+                      </TableHead>
+                      <TableBody>
+                        {selectedEvaluation.results?.map((result, index) => (
+                          <TableRow key={index}>
+                            <TableCell>{result.modelName || 'Unknown Model'}</TableCell>
+                            <TableCell>
+                              {result.averageQualityScore ? result.averageQualityScore.toFixed(2) : 'N/A'}
+                            </TableCell>
+                            <TableCell>
+                              {result.averageCompleteness ? result.averageCompleteness.toFixed(2) : 'N/A'}
+                            </TableCell>
+                            <TableCell>
+                              {result.tokenUsage?.total ? result.tokenUsage.total.toLocaleString() : 'N/A'}
+                            </TableCell>
+                            <TableCell>
+                              {result.totalCost ? `$${result.totalCost.toFixed(4)}` : 'N/A'}
+                            </TableCell>
+                          </TableRow>
+                        ))}
+                      </TableBody>
+                    </Table>
+                  </TableContainer>
+
+                  <Typography variant="h6" gutterBottom sx={{ mt: 3 }}>Model Comparisons</Typography>
+                  <TableContainer component={Paper}>
+                    <Table>
+                      <TableHead>
+                        <TableRow>
+                          <TableCell>Model A</TableCell>
+                          <TableCell>Model B</TableCell>
+                          <TableCell>Winner</TableCell>
+                          <TableCell>Quality Difference</TableCell>
+                        </TableRow>
+                      </TableHead>
+                      <TableBody>
+                        {selectedEvaluation.modelComparisons?.map((comparison, index) => (
+                          <TableRow key={index}>
+                            <TableCell>{comparison.modelA || 'Unknown'}</TableCell>
+                            <TableCell>{comparison.modelB || 'Unknown'}</TableCell>
+                            <TableCell>{comparison.comparison?.winner || 'N/A'}</TableCell>
+                            <TableCell>
+                              {comparison.comparison?.qualityDifference 
+                                ? comparison.comparison.qualityDifference.toFixed(2)
+                                : 'N/A'}
+                            </TableCell>
+                          </TableRow>
+                        ))}
+                      </TableBody>
+                    </Table>
+                  </TableContainer>
+                </>
+              )}
+              {selectedEvaluation.status === 'running' && (
+                <Box sx={{ display: 'flex', flexDirection: 'column', alignItems: 'center', py: 4 }}>
+                  <CircularProgress />
+                  <Typography variant="h6" sx={{ mt: 2 }}>
+                    Evaluation in Progress
+                  </Typography>
+                  <Typography variant="body2" color="text.secondary" sx={{ mt: 1 }}>
+                    This may take a few minutes to complete.
+                  </Typography>
+                </Box>
+              )}
+              {selectedEvaluation.status === 'failed' && (
+                <Box sx={{ display: 'flex', flexDirection: 'column', alignItems: 'center', py: 4 }}>
+                  <Typography variant="h6" color="error">
+                    Evaluation Failed
+                  </Typography>
+                  <Typography variant="body2" color="text.secondary" sx={{ mt: 1 }}>
+                    Please try running the evaluation again.
+                  </Typography>
+                </Box>
+              )}
+            </Box>
+          )}
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => setOpenDialog(false)}>Close</Button>
+        </DialogActions>
+      </Dialog>
     </motion.div>
   );
 };

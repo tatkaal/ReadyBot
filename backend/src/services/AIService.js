@@ -54,34 +54,15 @@ class AIService {
   /**
    * Get LLM configuration for a specific task
    * @param {string} task - The task type
-   * @param {Object} survey - The survey object
    * @returns {Promise<Object>} - The LLM configuration
    */
-  async getLLMConfig(task, survey) {
+  async getLLMConfig(task) {
     try {
-      if (!survey.llmConfigs || !survey.llmConfigs[task]) {
-        // Return default configuration if none specified
-        return {
-          model: 'gpt-3.5-turbo',
-          temperature: 0.7,
-          maxTokens: 500
-        };
-      }
-
-      const config = await LLMConfig.findByPk(survey.llmConfigs[task]);
-      if (!config || !config.isActive) {
-        // Return default configuration if config not found or inactive
-        return {
-          model: 'gpt-3.5-turbo',
-          temperature: 0.7,
-          maxTokens: 500
-        };
-      }
-
+      // Return default configuration
       return {
-        model: config.model,
-        temperature: config.temperature,
-        maxTokens: config.maxTokens
+        model: 'gpt-3.5-turbo',
+        temperature: 0.7,
+        maxTokens: 500
       };
     } catch (error) {
       console.error('Error getting LLM config:', error);
@@ -96,30 +77,27 @@ class AIService {
 
   /**
    * Generate a response to a user message in a conversational context
-   * @param {string} message - The user's message
-   * @param {Array} history - Previous conversation history
-   * @param {Object} survey - The survey object
+   * @param {string} prompt - The user's message
+   * @param {string} model - The AI model to use
+   * @param {number} temperature - The temperature for the model
    * @returns {Promise<string>} - The AI-generated response
    */
-  async generateResponse(message, history = [], survey) {
+  async generateResponse(prompt, model, temperature = 0.7) {
     try {
-      const config = await this.getLLMConfig('response_generation', survey);
-
-      // Format conversation history for OpenAI
+      const config = await this.getLLMConfig('response_generation');
       const messages = [
-        { role: 'system', content: 'You are ReadyBot, a helpful survey assistant. Respond conversationally to the user while collecting their survey responses.' },
-        ...history.map(msg => ({
-          role: msg.role,
-          content: msg.content
-        })),
-        { role: 'user', content: message }
+        { role: 'system', content: 'You are a helpful AI assistant.' },
+        { role: 'user', content: prompt }
       ];
 
       const response = await openai.chat.completions.create({
-        model: config.model,
-        messages,
-        temperature: config.temperature,
+        model: model,
+        messages: messages,
+        temperature: temperature,
         max_tokens: config.maxTokens,
+        top_p: config.topP,
+        frequency_penalty: config.frequencyPenalty,
+        presence_penalty: config.presencePenalty
       });
 
       return response.choices[0].message.content;
@@ -139,7 +117,7 @@ class AIService {
    */
   async scoreResponseQuality(question, answer, guidelines = '', survey) {
     try {
-      const config = await this.getLLMConfig('scoring', survey);
+      const config = await this.getLLMConfig('scoring');
 
       const prompt = `
         You are an AI quality evaluator. Your task is to score the quality of a response to a survey question.
@@ -183,90 +161,92 @@ class AIService {
    * Compare two AI models on a set of test cases
    * @param {string} modelA - First model to compare (e.g., 'gpt-4')
    * @param {string} modelB - Second model to compare (e.g., 'gpt-3.5-turbo')
-   * @param {Array} testCases - Array of test questions
+   * @param {string} prompt - The test prompt
    * @returns {Promise<Object>} - Comparison results
    */
-  async compareModels(modelA, modelB, testCases) {
+  async compareModels(modelA, modelB, prompt) {
     try {
-      const results = {
-        modelA,
-        modelB,
-        testResults: [],
-        metrics: {
-          averageAgreement: 0,
-          costDifference: this.estimateModelCostDifference(modelA, modelB),
-          latencyDifference: 0,
-          qualityDifference: 0
-        }
-      };
+      const responseA = await this.generateResponse(prompt, modelA);
+      const responseB = await this.generateResponse(prompt, modelB);
 
-      const startTime = Date.now();
+      const comparisonPrompt = `You are an AI model evaluator. Compare these two responses and determine which is better. Consider accuracy, completeness, and clarity.
+
+Response A: ${responseA}
+
+Response B: ${responseB}
+
+You must respond with a valid JSON object in exactly this format, with no additional text:
+{
+  "winner": "A" or "B",
+  "qualityDifference": number between 0 and 1,
+  "reasoning": "detailed explanation"
+}
+
+Do not include any text before or after the JSON object.`;
+
+      const comparisonResponse = await openai.chat.completions.create({
+        model: 'gpt-4',
+        messages: [
+          { role: 'system', content: 'You are a JSON-only response generator. You must respond with valid JSON only.' },
+          { role: 'user', content: comparisonPrompt }
+        ],
+        temperature: 0.3,
+        max_tokens: 500,
+        response_format: { type: "json_object" }
+      });
       
-      // Process each test case with both models
-      for (const testCase of testCases) {
-        const modelAStartTime = Date.now();
-        const modelAResponse = await this.generateResponse(testCase, [], modelA);
-        const modelATime = Date.now() - modelAStartTime;
+      try {
+        const comparison = JSON.parse(comparisonResponse.choices[0].message.content);
         
-        const modelBStartTime = Date.now();
-        const modelBResponse = await this.generateResponse(testCase, [], modelB);
-        const modelBTime = Date.now() - modelBStartTime;
+        // Validate the response format
+        if (!comparison.winner || !comparison.qualityDifference || !comparison.reasoning) {
+          throw new Error('Invalid comparison format');
+        }
         
-        // Score both responses
-        const modelAScore = await this.scoreResponseQuality(testCase, modelAResponse);
-        const modelBScore = await this.scoreResponseQuality(testCase, modelBResponse);
+        // Ensure winner is either A or B
+        if (comparison.winner !== 'A' && comparison.winner !== 'B') {
+          comparison.winner = 'A'; // Default to A if invalid
+        }
         
-        // Calculate agreement (how similar the responses are)
-        const agreement = await this.calculateResponseAgreement(modelAResponse, modelBResponse);
+        // Ensure qualityDifference is a number between 0 and 1
+        comparison.qualityDifference = Math.min(Math.max(Number(comparison.qualityDifference), 0), 1);
         
-        results.testResults.push({
-          question: testCase,
-          modelAResponse,
-          modelBResponse,
-          modelAScore,
-          modelBScore,
-          modelALatency: modelATime,
-          modelBLatency: modelBTime,
-          agreement
-        });
+        return {
+          modelA,
+          modelB,
+          responseA,
+          responseB,
+          comparison
+        };
+      } catch (parseError) {
+        console.error('Error parsing comparison response:', parseError);
+        // Return a default comparison if parsing fails
+        return {
+          modelA,
+          modelB,
+          responseA,
+          responseB,
+          comparison: {
+            winner: 'A',
+            qualityDifference: 0.5,
+            reasoning: "Unable to determine a clear winner due to technical limitations"
+          }
+        };
       }
-      
-      // Calculate aggregate metrics
-      const totalTests = results.testResults.length;
-      
-      if (totalTests > 0) {
-        // Average agreement across all test cases
-        results.metrics.averageAgreement = results.testResults.reduce(
-          (sum, result) => sum + result.agreement, 0
-        ) / totalTests;
-        
-        // Average latency difference
-        const avgLatencyA = results.testResults.reduce(
-          (sum, result) => sum + result.modelALatency, 0
-        ) / totalTests;
-        
-        const avgLatencyB = results.testResults.reduce(
-          (sum, result) => sum + result.modelBLatency, 0
-        ) / totalTests;
-        
-        results.metrics.latencyDifference = avgLatencyA - avgLatencyB;
-        
-        // Average quality difference
-        const avgQualityA = results.testResults.reduce(
-          (sum, result) => sum + result.modelAScore, 0
-        ) / totalTests;
-        
-        const avgQualityB = results.testResults.reduce(
-          (sum, result) => sum + result.modelBScore, 0
-        ) / totalTests;
-        
-        results.metrics.qualityDifference = avgQualityA - avgQualityB;
-      }
-      
-      return results;
     } catch (error) {
       console.error('Error comparing models:', error);
-      throw new Error('Failed to compare AI models');
+      // Return a default comparison if the entire process fails
+      return {
+        modelA,
+        modelB,
+        responseA: "Error generating response",
+        responseB: "Error generating response",
+        comparison: {
+          winner: 'A',
+          qualityDifference: 0.5,
+          reasoning: "Comparison failed due to technical limitations"
+        }
+      };
     }
   }
 
@@ -341,7 +321,7 @@ class AIService {
    */
   async classifyIntent(message, context, survey) {
     try {
-      const config = await this.getLLMConfig('intent_classification', survey);
+      const config = await this.getLLMConfig('intent_classification');
 
       const systemPrompt = `
         You are an AI intent classifier for a survey chatbot. Your task is to classify the user's intent from their message.
@@ -407,7 +387,7 @@ class AIService {
     if (score === 5) return ''; // No hint needed for perfect score
 
     try {
-      const config = await this.getLLMConfig('hint_generation', survey);
+      const config = await this.getLLMConfig('hint_generation');
 
       const prompt = `
         You are an AI mentor helping improve survey responses. Analyze the following:
@@ -442,6 +422,160 @@ class AIService {
       console.error('Error generating improvement hint:', error);
       return ''; // Return empty string if hint generation fails
     }
+  }
+
+  /**
+   * Compare two responses using an LLM judge
+   * @param {string} question - The original question
+   * @param {string} responseA - First response to compare
+   * @param {string} responseB - Second response to compare
+   * @returns {Promise<Object>} - Comparison results with winner and reasoning
+   */
+  async compareResponses(question, responseA, responseB) {
+    try {
+      const prompt = `
+        You are an AI judge comparing two responses to the same question.
+        
+        Question: ${question}
+        
+        Response A: ${responseA}
+        
+        Response B: ${responseB}
+        
+        Please evaluate which response is better and explain why. Consider:
+        1. Relevance to the question
+        2. Completeness of the answer
+        3. Clarity and organization
+        4. Depth of insight
+        
+        Return your evaluation in the following JSON format:
+        {
+          "winner": "A" or "B",
+          "reasoning": "Detailed explanation of why one response is better",
+          "scoreA": number between 1-5,
+          "scoreB": number between 1-5
+        }
+      `;
+
+      const response = await openai.chat.completions.create({
+        model: 'gpt-4',
+        messages: [{ role: 'user', content: prompt }],
+        temperature: 0.3,
+        max_tokens: 500,
+      });
+
+      return JSON.parse(response.choices[0].message.content);
+    } catch (error) {
+      console.error('Error comparing responses:', error);
+      throw new Error('Failed to compare responses');
+    }
+  }
+
+  /**
+   * Evaluate the completeness of a response against expected keywords
+   * @param {string} question - The original question
+   * @param {string} responseText - The response to evaluate
+   * @param {Array<string>} expectedKeywords - Keywords that should be present
+   * @returns {Promise<Object>} - Completeness evaluation results
+   */
+  async evaluateResponseCompleteness(question, responseText, expectedKeywords = []) {
+    try {
+      const prompt = `
+        You are an AI evaluator assessing the completeness of a response.
+        
+        Question: ${question}
+        
+        Response: ${responseText}
+        
+        ${expectedKeywords.length > 0 ? `Expected Keywords: ${expectedKeywords.join(', ')}` : ''}
+        
+        Please evaluate the response's completeness and return your assessment in the following JSON format:
+        {
+          "completenessScore": number between 0-1,
+          "missingKeywords": ["list", "of", "missing", "keywords"],
+          "presentKeywords": ["list", "of", "found", "keywords"],
+          "analysis": "Brief explanation of the completeness assessment"
+        }
+      `;
+
+      const completion = await openai.chat.completions.create({
+        model: 'gpt-4',
+        messages: [{ role: 'user', content: prompt }],
+        temperature: 0.3,
+        max_tokens: 500,
+      });
+
+      return JSON.parse(completion.choices[0].message.content);
+    } catch (error) {
+      console.error('Error evaluating response completeness:', error);
+      // Return a default completeness assessment if evaluation fails
+      return {
+        completenessScore: 0.5,
+        missingKeywords: [],
+        presentKeywords: [],
+        analysis: "Unable to evaluate completeness due to an error"
+      };
+    }
+  }
+
+  /**
+   * Calculate the cost-performance ratio for a model
+   * @param {string} model - The model to evaluate
+   * @param {Array<Object>} testCases - Array of test cases
+   * @returns {Promise<Object>} - Cost-performance metrics
+   */
+  async calculateCostPerformanceRatio(model, testCases) {
+    try {
+      const results = {
+        totalCost: 0,
+        totalQuality: 0,
+        averageResponseTime: 0,
+        tokenUsage: 0
+      };
+
+      for (const testCase of testCases) {
+        const startTime = Date.now();
+        const response = await this.generateResponse(testCase.question, model);
+        const responseTime = Date.now() - startTime;
+
+        const qualityScore = await this.scoreResponseQuality(testCase.question, response);
+        const tokenCount = response.split(/\s+/).length;
+        const cost = tokenCount * this.getModelCostPerToken(model);
+
+        results.totalCost += cost;
+        results.totalQuality += qualityScore;
+        results.averageResponseTime += responseTime;
+        results.tokenUsage += tokenCount;
+      }
+
+      const testCount = testCases.length;
+      results.averageResponseTime /= testCount;
+      results.averageQuality = results.totalQuality / testCount;
+      results.costPerformanceRatio = results.averageQuality / results.totalCost;
+
+      return results;
+    } catch (error) {
+      console.error('Error calculating cost-performance ratio:', error);
+      throw new Error('Failed to calculate cost-performance ratio');
+    }
+  }
+
+  /**
+   * Get the cost per token for a specific model
+   * @param {string} model - The model name
+   * @returns {number} - Cost per token
+   */
+  getModelCostPerToken(model) {
+    const costs = {
+      'gpt-4': 0.00006,
+      'gpt-4-0314': 0.00006,
+      'gpt-4-0613': 0.00006,
+      'gpt-3.5-turbo': 0.000002,
+      'gpt-3.5-turbo-0301': 0.000002,
+      'gpt-3.5-turbo-0613': 0.000002
+    };
+
+    return costs[model] || 0.000002; // Default to gpt-3.5-turbo cost if unknown
   }
 }
 
