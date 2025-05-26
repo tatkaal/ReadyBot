@@ -1,163 +1,117 @@
-# ReadyBot - AI-Powered Survey Platform
+<div style="width:20%; height:20%">
 
-ReadyBot is a comprehensive survey platform that leverages AI to enhance survey creation, response analysis, and model evaluation. The platform provides tools for creating, managing, and analyzing surveys with advanced AI capabilities.
+![ReadyBot Logo](images/logo.png)
 
-## Features
+</div>
 
-### Survey Management
-- Create and manage surveys with customizable questions
-- Support for multiple question types
-- Real-time survey status tracking
-- Survey response collection and analysis
+# ReadyBot - Survey Smarter Not Harder
 
-### AI-Powered Features
-- AI-assisted survey question generation
-- Response quality scoring and analysis
-- Intent classification for user interactions
-- Response completeness evaluation
-- Model performance comparison
+> **ReadyBot** : Turns static surveys into engaging, LLM‑driven conversations and scores every answer on the fly.
 
-### Model Evaluation System
-- Compare different AI models (GPT-4, GPT-3.5-turbo, etc.)
-- Evaluate models based on:
-  - Response quality
-  - Completeness
-  - Response time
-  - Cost efficiency
-- Detailed performance metrics and visualizations
-- Side-by-side model comparisons
-- Cost-performance analysis
+---
 
-### Authentication & Security
-- JWT-based authentication
-- Role-based access control
-- Secure API endpoints
-- Environment variable configuration
+## 🔧 Tech Stack
 
-## Tech Stack
+<p>
+  <img alt="Node.js" src="https://img.shields.io/badge/Node.js-339933?logo=node.js&logoColor=white">
+  <img alt="Express" src="https://img.shields.io/badge/Express-000000?logo=express&logoColor=white">
+  <img alt="React" src="https://img.shields.io/badge/React-61DAFB?logo=react&logoColor=white">
+  <img alt="Vite" src="https://img.shields.io/badge/Vite-646CFF?logo=vite&logoColor=white">
+  <img alt="Material‑UI" src="https://img.shields.io/badge/MUI-007FFF?logo=mui&logoColor=white">
+  <img alt="PostgreSQL" src="https://img.shields.io/badge/PostgreSQL-4169E1?logo=postgresql&logoColor=white">
+  <img alt="Sequelize" src="https://img.shields.io/badge/Sequelize-52B0E7?logo=sequelize&logoColor=white">
+  <img alt="OpenAI" src="https://img.shields.io/badge/OpenAI-412991?logo=openai&logoColor=white">
+  <img alt="Docker" src="https://img.shields.io/badge/Docker-2496ED?logo=docker&logoColor=white">
+</p>
 
-### Frontend
-- React.js
-- Material-UI
-- Chart.js for visualizations
-- Framer Motion for animations
-- Axios for API communication
+---
 
-### Backend
-- Node.js
-- Express.js
-- Sequelize ORM
-- PostgreSQL database
-- OpenAI API integration
+## 🚀 Quick Start
 
-## Getting Started
+### Development setup
 
-### Prerequisites
-- Node.js (v14 or higher)
-- PostgreSQL
-- OpenAI API key
-
-### Installation
-
-1. Clone the repository:
 ```bash
-git clone https://github.com/yourusername/readybot.git
+git clone https://github.com/your‑org/readybot.git
 cd readybot
+
+# databases
+createdb readybot_dev
+# environment
+cp backend/.env.example backend/.env   # edit secrets
+cp frontend/.env.example frontend/.env
+
+# install & run
+cd backend && npm install && npm run dev      # http://localhost:5000
+cd ../frontend && npm install && npm run dev  # http://localhost:3000
 ```
 
-2. Install dependencies:
+### Docker (one‑liner)
+
 ```bash
-# Install backend dependencies
-cd backend
-npm install
-
-# Install frontend dependencies
-cd ../frontend
-npm install
+docker compose up --build          # frontend :3000 | api :5000 | db :5432
 ```
 
-3. Configure environment variables:
-```bash
-# Backend (.env)
-DATABASE_URL=postgresql://username:password@localhost:5432/readybot
-JWT_SECRET=your_jwt_secret
-OPENAI_API_KEY=your_openai_api_key
+Set `OPENAI_API_KEY` in your shell or override in *docker‑compose.yml*.
 
-# Frontend (.env)
-VITE_API_URL=http://localhost:5000
-```
+---
 
-4. Initialize the database:
-```bash
-cd backend
-npm run migrate
-```
+## 🎮 Using ReadyBot
 
-5. Start the development servers:
-```bash
-# Start backend server
-cd backend
-npm run dev
+1. **Sign‑up** as an admin and create questions (optionally add “quality answer” notes).  
+2. Bundle questions into a survey and click **Generate Link**.  
+3. Share the link – participants are greeted by the chatbot and guided question‑by‑question.  
+4. Responses and 1‑5 quality scores stream into your dashboard in real time.
 
-# Start frontend server
-cd frontend
-npm run dev
-```
+---
 
-## API Endpoints
+## 🤖 How it Works
 
-### Authentication
-- `POST /api/auth/register` - Register new admin
-- `POST /api/auth/login` - Admin login
+| Process | Plain‑English Explanation |
+|---------|---------------------------|
+| **Intent Classification** | Every participant message is sent to the LLM with a prompt asking *“What is the user trying to do?”*. It replies in JSON (answer / skip / go‑back / help). |
+| **Answer Scoring** | When an answer is submitted, the LLM receives the answer, the question text and (if provided) the admin’s quality guidelines, and returns a number **1–5** describing answer quality. |
+| **Hint Generation** | If the score is below a threshold, the same call asks the model for a one‑sentence tip the participant can use to improve. |
+| **Model Evaluation Harness** | A curated set of Q&A pairs is replayed across multiple candidate models. The harness records average score, completeness, latency, token usage and $$ cost, then prints a comparison report. |
+| **Observability** | Every live interaction logs timestamp, latency, tokens and quality score into Postgres → Grafana dashboards and alerts on drift. |
 
-### Surveys
-- `GET /api/surveys` - Get all surveys
-- `POST /api/surveys` - Create new survey
-- `GET /api/surveys/:id` - Get survey by ID
-- `PUT /api/surveys/:id` - Update survey
-- `DELETE /api/surveys/:id` - Delete survey
+---
 
-### Model Evaluation
-- `GET /api/evaluation` - Get all evaluations
-- `POST /api/evaluation` - Create new evaluation
-- `GET /api/evaluation/:id` - Get evaluation by ID
-- `POST /api/evaluation/:id/run` - Run evaluation
-- `DELETE /api/evaluation/:id` - Delete evaluation
+## 📊 Evaluation & Continuous QA
 
-## Model Evaluation Features
+* **Benchmark suite** – Golden answers + expected scores used as “unit tests” for the LLM layer (run in CI).  
+* **A/B or Canary** – Route a slice of production traffic to a cheaper model and compare live metrics against baseline gates:  
+  * Δ Quality ≤ 0.5, Δ Completeness ≤ 0.1, p95 Latency ≤ 2 s.  
+* **Automated report** – `npm run evaluate` generates CSV + HTML dashboards so you can spot trade‑offs between cost and quality before rolling out.  
+* **Contract tests** – JSON schemas for every LLM tool call prevent breaking changes.  
 
-### Supported Models
-- GPT-4
-- GPT-3.5-turbo
-- GPT-3.5-turbo-16k
+---
 
-### Evaluation Metrics
-- Quality Score (1-5 scale)
-- Completeness Score (0-1 scale)
-- Response Time
-- Token Usage
-- Cost Analysis
+## 📑 Appendix
 
-### Comparison Features
-- Side-by-side model comparisons
-- Performance charts
-- Cost-performance ratios
-- Detailed test case results
+### Key Features
 
-## Contributing
+| Feature | Summary |
+|---------|---------|
+| Question CRUD & guidelines | Admin UI to add / edit questions and optional “what good looks like” notes |
+| Shareable survey links | One‑click link generation with unique ID |
+| Conversational flow | Chatbot enforces order but lets users jump around |
+| Automated scoring | 1‑5 quality score per answer |
+| Improvement hints | Friendly suggestions when answers are weak |
+| Multi‑model ready | Swap LLMs via **LLMConfig** without code changes |
+| Evaluation harness | Compare cost & quality across models |
+| Observability | Token, latency & score metrics stored for dashboards |
 
-1. Fork the repository
-2. Create your feature branch (`git checkout -b feature/AmazingFeature`)
-3. Commit your changes (`git commit -m 'Add some AmazingFeature'`)
-4. Push to the branch (`git push origin feature/AmazingFeature`)
-5. Open a Pull Request
+### Data Model Cheat‑sheet
 
-## License
+| Model | Important fields |
+|-------|-----------------|
+| **Admin** | `id`, `username`, `email`, `passwordHash` |
+| **Question** | `id`, `text`, `qualityGuidelines`, `createdBy` |
+| **Survey** | `id`, `title`, `uniqueId`, `shareableLink`, `llmConfigs` |
+| **Response** | `id`, `surveyId`, `answers[]`, `qualityScore`, `hint` |
+| **LLMConfig** | `id`, `task`, `modelName`, `temperature` |
+| **ModelEvaluation** | `id`, `models[]`, `metricsJSON` |
 
-This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
+---
 
-## Acknowledgments
-
-- OpenAI for providing the AI models
-- Material-UI for the component library
-- Chart.js for visualization capabilities
+### (MIT License)
