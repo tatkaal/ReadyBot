@@ -1,8 +1,7 @@
-<div style="width:10px; height:10px; margin-left:180px;">
+<p align="center">
+  <img src="images/logo.png" alt="ReadyBot Logo" width="225" height="207">
+</p>
 
-![ReadyBot Logo](images/logo.png)
-
-</div>
 
 # ReadyBot - Survey Smarter Not Harder
 
