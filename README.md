@@ -1,4 +1,4 @@
-<div style="width:100px; height:100px; margin-left:180px;">
+<div style="width:10px; height:10px; margin-left:180px;">
 
 ![ReadyBot Logo](images/logo.png)
 
